@@ -24,6 +24,23 @@
 #ifndef _ACTION_PRIMITIVE_H
 #define _ACTION_PRIMITIVE_H
 
+#include <xercesc/dom/DOM.hpp>
+#include <xercesc/dom/DOMElement.hpp>
+#include <xercesc/dom/DOMDocument.hpp>
+#include <xercesc/util/PlatformUtils.hpp>
+#include <opencog/atomspace/AtomSpace.h>
+#include <opencog/spatial/math/Vector3.h>
+#include <opencog/spatial/math/Quaternion.h>
+
+using XERCES_CPP_NAMESPACE::DOMDocument;
+using XERCES_CPP_NAMESPACE::DOMElement;
+
+using std::string;
+using std::shared_ptr;
+
+using opencog::spatial::math::Vector3;
+using opencog::spatial::math::Quaternion;
+
 /**
  * ActionPrimitive.h:
  *
@@ -41,14 +58,105 @@ namespace opencog { namespace pai {
  * are composed.  As a general rule of thumb, use plans for high level
  * behaviors, actions for goal-driven behaviors which may be defined at runtime
  * and which may depend on one another, and action primitives for the simplest
- * behaviors which should be defined by all embodiments and which do not depend
- * on one another.
+ * behaviors which are uniform for all embodiments and not interdependent.
  */
 class ActionPrimitive
 {
+
 public:
-    ActionPrimitive();
+
+    // err on the side of subclasses needing to deallocate pointers, etc.
+    virtual ~ActionPrimitive();
+
+    /**
+     * Create an xml element in the DOMDocument XML document. An action
+     * primitive element's form depends on its subtype.
+     *
+     * @param doc The XML document where the element will be inserted.
+     * @param parent The parent element where the element will be created.
+     * @return The DOMElement just created.
+     */
+    virtual DOMElement* toXML(const DOMDocument& doc, const DOMElement& parent)
+        const = 0;
+
+    /**
+     * Create an string representation for the action primitive.
+     * Standard insertion operators are defined for subtypes.
+     *
+     * @return The string representation of the action primitive.
+     */
+    virtual shared_ptr<string> toString() const = 0;
+
+    /**
+     * Get the type name as a string to identify the primitive in xml.
+     *
+     * @return The string repesentation of the primitive's type.
+     */
+    virtual shared_ptr<string> getTypeName() const = 0;
+
+    /**
+     * Get the name of the action primitive.
+     *
+     * @return The name of the action primitive.
+     */
+    const string & getName() const;
+
+    /**
+     * Set the name of the action primitive.
+     *
+     * @param name The name of the action primitive.
+     */
+    void setName(const string & name);
+
+protected:
+
+    /**
+     * The name of the action primitive.  Mostly used to distinguish
+     * action primitives in the XML.
+     */
+    string _name;
+
+    /**
+     * Helper function for intializing an xml element.
+     *
+     * @param doc The XML document where the element will be inserted.
+     * @return The DOMElement just created.
+     */
+    static DOMElement* createElement(const DOMDocument& doc);
+
 };// class ActionPrimitive
+
+
+/**
+ *
+ */
+class TranslationActionPrimitive : public ActionPrimitive
+{
+private:
+
+    Vector3 _transVector;
+
+
+public:
+
+    TranslationActionPrimitive(const string & name, const Vector3 & transVector);
+    TranslationActionPrimitive();
+    TranslationActionPrimitive(const TranslationActionPrimitive & rhs);
+    virtual ~TranslationActionPrimitive() {}
+    TranslationActionPrimitive& operator=(const TranslationActionPrimitive & rhs);
+
+    const Vector3 & getTransVector() const;
+    void setTransVector(const Vector3 & transVector);
+
+    virtual DOMElement* toXML(const DOMDocument& doc, const DOMElement& parent) const;
+
+    virtual shared_ptr<string> toString() const;
+
+    virtual shared_ptr<string> getTypeName() const;
+
+};// class TranslationActionPrimitive
+
+
 
 } } // namespace opencog::pai
 
