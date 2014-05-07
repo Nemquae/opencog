@@ -1,4 +1,6 @@
 #include "ActionPrimitive.h"
+#include "PVPXmlConstants.h"
+#include "PAIUtils.h"
 
 using XERCES_CPP_NAMESPACE::XMLString;
 
@@ -24,6 +26,8 @@ DOMElement* ActionPrimitive::createElement(const DOMDocument& doc)
     XMLCh* typeStr = XERCES_CPP_NAMESPACE::XMLString::transcode(type.getName().c_str());
     param->setAttribute(tag, typeStr);
     XERCES_CPP_NAMESPACE::XMLString::release(&typeStr);
+
+
 }
 
 TranslationActionPrimitive::TranslationActionPrimitive()
