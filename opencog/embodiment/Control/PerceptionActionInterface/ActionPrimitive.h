@@ -156,6 +156,62 @@ public:
 
 };// class TranslationActionPrimitive
 
+/**
+ *
+ *
+ */
+class RotationActionPrimitive : public ActionPrimitive
+{
+private:
+
+    Quaternion _rotatQuaternion;
+
+public:
+
+    RotationActionPrimitive(const string & name, const Quaternion & rotatQuaternion);
+    RotationActionPrimitive();
+    RotationActionPrimitive(const RotationActionPrimitive & rhs);
+    virtual ~TranslationActionPrimitive() {}
+    RotationActionPrimitive& operator=(const TranslationActionPrimitive & rhs);
+
+    const Quaternion & getRotatQuaternion() const;
+    void setRotatQuaternion(const Quaternion & rotatQuaternion);
+
+    virtual DOMElement * toXML(const DOMDocument& doc, const DOMElement& parent) const;
+
+    virtual shared_ptr<string> toString() const;
+
+    virtual shared_ptr<string> getTypeName() const;
+
+};// class RotationActionPrimitive
+
+/**
+ *
+ */
+class ScaleActionPrimitive : public ActionPrimitive
+{
+private:
+
+    Vector3 _scaleVector;
+
+public:
+
+    ScaleActionPrimitive(const string & name, const Vector3 & scaleVector);
+    ScaleActionPrimitive();
+    ScaleActionPrimitive(const ScaleActionPrimitive & rhs);
+    virtual ~ScaleActionPrimitive() {}
+    ScaleActionPrimitive& operator=(const ScaleActionPrimitive & rhs);
+
+    const Vector3 & getScaeVector() const;
+    void setScaleVector(const Vector3 & scaleVector);
+
+    virtual DOMElement * toXML(const DOMDocument& doc, const DOMElement& parent) const;
+
+    virtual shared_ptr<string> toString() const;
+
+    virtual shared_ptr<string> getTypeName()() const;
+
+};
 
 
 } } // namespace opencog::pai
