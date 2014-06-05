@@ -25,8 +25,8 @@ ADD_LIBRARY(comboreduct SHARED
 	combo/perception
 	combo/procedure_call
 	combo/procedure_repository
+	combo/similarity
 	combo/simple_nn
-	combo/tree_generation
 	combo/variable_unifier
 	combo/vertex
 
@@ -34,7 +34,6 @@ ADD_LIBRARY(comboreduct SHARED
 	table/table_io
 
 	interpreter/eval
-	interpreter/perception_eval
 	interpreter/interpreter
 
 	type_checker/type_tree_def
@@ -60,7 +59,13 @@ ADD_LIBRARY(comboreduct SHARED
 	reduct/perception_reduction
 	reduct/perception_rules
 	reduct/reduct
+)
 
+TARGET_LINK_LIBRARIES (comboreduct
+	cogutil
+)
+
+ADD_LIBRARY(comboant SHARED
 	ant_combo_vocabulary/ant_builtin_action
 	ant_combo_vocabulary/ant_perception
 	ant_combo_vocabulary/ant_action_symbol
@@ -68,9 +73,10 @@ ADD_LIBRARY(comboreduct SHARED
 	ant_combo_vocabulary/ant_combo_vocabulary
 )
 
-TARGET_LINK_LIBRARIES (comboreduct
+TARGET_LINK_LIBRARIES (comboant
 	cogutil
 )
+
 
 #install library
 IF (WIN32)

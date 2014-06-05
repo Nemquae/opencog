@@ -32,6 +32,7 @@
 #include <opencog/comboreduct/combo/vertex.h>
 #include <opencog/comboreduct/reduct/reduct.h>
 #include <opencog/comboreduct/table/table.h>
+#include <opencog/learning/moses/main/problem.h>
 #include <opencog/learning/moses/metapopulation/metapop_params.h>
 #include <opencog/learning/moses/moses/moses_main.h>
 #include <opencog/learning/moses/moses/moses_params.h>
@@ -41,10 +42,21 @@
 
 namespace opencog { namespace moses {
 
-struct problem_params
+// XXX FIXME TODO The structure below should be split into multiple
+// parts, with each sub-part responsible for picking out the argv's
+// that it cares about. Unfortunately, this requires getting rid of 
+// boost::program_options (because boost::program_options does not
+// allow modulariztion in this way; it forces all program options to
+// be specified in a single instance of options_description; if this
+// isn't done, then parse_command_line() blows up, and notify() blows
+// up. And then theres variables_map to hack around. So its badly
+// designed.  I tried to hack past the damage but its overwhelming.
+// Argh ...
+struct problem_params : public option_base
 {
     problem_params();
-    void parse_options(int argc, char* argv[]);
+    void add_options(boost::program_options::options_description&);
+    void parse_options(boost::program_options::variables_map&);
 
     // program options, see options_description below for their meaning
     std::vector<std::string> jobs_str;
@@ -64,7 +76,6 @@ struct problem_params
     int max_gens;
     std::string log_level;
     std::string log_file;
-    bool log_file_dep_opt;
 
     // output printing options (metapop_printer)
     long result_count;
@@ -83,23 +94,23 @@ struct problem_params
     std::vector<std::string> include_only_ops_str;
     std::vector<std::string> ignore_ops_str;
     vertex_set ignore_ops;
-    std::vector<std::string> ignore_features_str;
     std::vector<std::string> exemplars_str;
     std::vector<combo_tree> exemplars;
 
     // metapop_param
     int max_candidates;
-    bool reduce_all;
     int revisit;
+    bool reduce_all;
+    bool linear_regression;
+    bool boosting;
     double noise;
     score_t complexity_temperature;
     score_t complexity_ratio;
     double cap_coef;
     unsigned cache_size;
-    bool linear_regression;
     double perm_ratio;
     
-    // diversity parameters
+    // metapopulation diversity parameters
     bool include_dominated;
     score_t diversity_pressure;
     score_t diversity_exponent;
@@ -108,7 +119,7 @@ struct problem_params
     score_t diversity_p_norm;
     std::string diversity_dst2dp;
 
-    // optim_param
+    // optim_param (applicable for all optimzation algos)
     std::string opt_algo; //optimization algorithm
     double pop_size_ratio;
     score_t max_score;
@@ -118,11 +129,7 @@ struct problem_params
     bool weighted_accuracy;
     std::vector<contin_t> discretize_thresholds;
 
-    // hardness of the activation range
-    // constraint for problems pre, recall, prerec
-    score_t hardness;
-
-    // hc_param
+    // hc_param  (hill-climbing)
     bool hc_widen_search;
     bool hc_single_step;
     bool hc_crossover;
@@ -135,31 +142,16 @@ struct problem_params
     // classifier parameters
     bool use_well_enough;
 
+    // hardness of the activation range -- scoring-related
+    // constraint for problems pre, recall, prerec
+    score_t hardness;
+
     // pre params
     bool pre_worst_norm;
     bool gen_best_tree;
 
     // it params
     bool it_abs_err;
-
-    // XXX Demo options, these should be removed!
-    // viz the demo problems should get access to argc, argv...
-    // and do their own parsing.
-    std::string combo_str;
-    unsigned int problem_size;
-
-    // interesting predicates options.
-    // XXX just like above, the ip argv parser should grab these...
-    double ip_kld_weight;
-    double ip_skewness_weight;
-    double ip_stdU_weight;
-    double ip_skew_U_weight;
-
-    // Table-related options
-    // XXX just like above, the table_base argv parser should grab these...
-    std::vector<std::string> input_data_files;
-    std::string target_feature;
-    std::string weighting_feature;
 
     /// Enable feature selection while selecting exemplar
     /// feature selection happens before each representation building
@@ -182,8 +174,6 @@ protected:
     const unsigned int max_filename_size;
 
     reduct::logical_reduction lr;
-    boost::program_options::options_description desc;
-    void options_init();
 
 private:
     std::vector<std::string> col_labels;

@@ -24,16 +24,46 @@ class PLNUnitTester(TestCase):
         self.atomSpaceExpected = AtomSpace()
         self.testFiles = []
 
-        # Code below is to get us to the OC (git) root based on predictable test launch locations.
+        self.chainer = None
 
-        self.chainer = Chainer(self.atomSpaceInputs,
-                               stimulateAtoms=False, agent=self,
-                               learnRuleFrequencies=False,
-                               allow_output_with_variables=True,
-                               allow_backchaining_with_variables=True)
-
+        # Works:
+        self.addTestFile("AbductionRule_InheritanceLink.scm") # Under investigation
+        self.addTestFile("AndRule_new.scm")
+        self.addTestFile("BooleanTransformationRule_new.scm")
         self.addTestFile("DeductionRule_InheritanceLink.scm")
+        self.addTestFile("InductionRule_InheritanceLink.scm") # disabled due to result swapping CNodes on buildbot
+        self.addTestFile("InheritanceRule.scm")
+        self.addTestFile("InversionRule_InheritanceLink.scm")
+        self.addTestFile("OrCreationRule.scm")
         self.addTestFile("OrRule_new.scm")
+        self.addTestFile("NotCreationRule.scm")
+        self.addTestFile("TransitiveSimilarityRule_SimilarityLink.scm")
+
+        # Testing (just a placeholder for where to put tests while...testing them)
+        #self.addTestFile("SimilarityRule_And.scm")
+
+        # Amen is looking at this one:
+        #self.addTestFile("GeneralEvaluationToMemberRule.scm")
+
+        # Following tests give results that don't match or exceed expectations:
+        #self.addTestFile("LionTigerAS_new.scm") # Lots of stuff
+        #self.addTestFile("IntensionalLinkEvaluationRule_new.scm") # Creates an IntensionalSimilarityLink though no such rule was supplied.
+
+        # Following tests don't give chaining results, since we're testing forward chaining only right now lol.
+        #self.addTestFile("AndBulkEvaluationRule_new.scm")
+        #self.addTestFile("AndBulkEvaluationRule3EvaluationLinks_new.scm")
+        #self.addTestFile("AndBulkEvaluationRule3_new.scm")
+        #self.addTestFile("AndBulkEvaluationRuleEvaluationLinks_new.scm")
+        #self.addTestFile("AndBulkEvaluationRulePredicates_new.scm")
+        #self.addTestFile("NegatedAndBulkEvaluationRule3EvaluationLinks_new.scm")
+
+        # Doesn't work, not sure yet why.
+        #self.addTestFile("SubsetAS_new.scm")
+
+        # Doesn't work, as the unit test setup doesn't allow for changing TV's (YET)
+        # self.addTestFile("AndBreakdownRule.scm")
+
+
 
     def tearDown(self):
         del self.atomSpaceFileData
@@ -42,20 +72,43 @@ class PLNUnitTester(TestCase):
         del self.chainer
 
     def test_all(self):
-        for testFile in self.testFiles:
-            print "Testing file: " + testFile
-            self.run_file(testFile)
+        if len(self.testFiles) == 0:
+            print "No test files have been selected."
+        else:
+            for testFile in self.testFiles:
+                print "Testing file: " + testFile
+                self.run_file(testFile)
 
     def addTestFile(self, testFile):
         # Again, default to dev mode
-        ruleFolder = str(os.getcwd()) + "/scm/specific_rules/"
+        ruleFolder = str(os.getcwd()) + "/new_scm_tests/"
 
         if not __DEV_MODE__:
-            ruleFolder = os.getenv("PROJECT_SOURCE_DIR") + "/tests/python/test_pln/scm/specific_rules/"
+            ruleFolder = os.getenv("PROJECT_SOURCE_DIR") + "/tests/python/test_pln/new_scm_tests/"
 
         fullTestFile = ruleFolder + testFile
 
         self.testFiles.append(fullTestFile)
+
+    def run_chaining_steps(self):
+        if __VERBOSE__:
+            print "Rules that can be applied:"
+            print [" *" + r.name for r in self.chainer.rules]
+
+        numberOfSteps = 1
+        try:
+            numberOfStepsNode = self.get_predicate_arguments(self.atomSpaceFileData, "forwardSteps")
+            numberOfSteps = int(numberOfStepsNode[0].name)
+        except:
+            numberOfSteps = 1
+
+        while numberOfSteps > 0:
+            result = self.chainer.forward_step()
+
+            if not result is None:
+                numberOfSteps -= 1
+                if __VERBOSE__:
+                    print result
 
     def reset_atom_spaces(self):
         self.reset_atom_space(self.atomSpaceFileData)
@@ -69,17 +122,9 @@ class PLNUnitTester(TestCase):
         atomspaceToReset.clear()
 
         # Default to dev mode
-        # Build folder is up, up, up, /build
         coreTypes = "atomspace/core_types.scm"
-        # Source root is up, up, up
         utilities = "scm/utilities.scm"
-
-        if __VERBOSE__:
-            if (os.path.exists(coreTypes)):
-                print "Path '" + coreTypes + "' exists."
-
-            if (os.path.exists(utilities)):
-                print "Path '" + utilities + "' exists."
+        plnTypes = "learning/pln/pln_types.scm"
 
         if not __DEV_MODE__:
             sourceFolder = os.getenv("PROJECT_SOURCE_DIR")
@@ -87,9 +132,11 @@ class PLNUnitTester(TestCase):
 
             coreTypes = binFolder + "/opencog/atomspace/core_types.scm"
             utilities = sourceFolder + "/opencog/scm/utilities.scm"
+            plnTypes = binFolder + "/opencog/learning/pln/pln_types.scm"
 
         self.load_file_into_atomspace(coreTypes, atomspaceToReset)
         self.load_file_into_atomspace(utilities, atomspaceToReset)
+        self.load_file_into_atomspace(plnTypes, atomspaceToReset)
 
     def fill_atomspace(self, atomspace, atomList):
         for atom in atomList:
@@ -126,28 +173,6 @@ class PLNUnitTester(TestCase):
             #allRules.import_rule(rule, self.chainer)
             self.chainer.add_rule(allRules.lookup_rule(rule))
 
-
-    def run_chaining_steps(self):
-        if __VERBOSE__:
-            print "Rules that can be applied:"
-            print [" *" + r.name for r in self.chainer.rules]
-
-        numberOfSteps = 1
-        try:
-            numberOfStepsNode = self.get_predicate_arguments(self.atomSpaceFileData, "forwardSteps")
-            numberOfSteps = int(numberOfStepsNode[0].name)
-        except:
-            numberOfSteps = 1
-
-
-        while numberOfSteps > 0:
-            result = self.chainer.forward_step()
-
-            if not result is None:
-                numberOfSteps -= 1
-                if __VERBOSE__:
-                    print result
-
     def atomspace_links_to_list(self, atomSpace):
         result = []
 
@@ -182,14 +207,14 @@ class PLNUnitTester(TestCase):
         allPredictedItemsExist = False
         allItemsWerePredicted = False
 
-        print "Checking if all predicted items exist:"
+        print "Checking if all predicted items were created:"
 
         if self.check_atomspace_contains_atomspace(self.atomSpaceExpected, self.atomSpaceInputs):
             print "  Yes, all predicted items exist"
             allPredictedItemsExist = True
         else:
             print "  No, not all predicted items were created (see above for details)"
-        print "Checking if all items were predicted:"
+        print "Checking if all created items were predicted:"
 
         if self.check_atomspace_contains_atomspace(self.atomSpaceInputs, self.atomSpaceExpected):
             print "  Yes, all created items were predicted"
@@ -200,21 +225,27 @@ class PLNUnitTester(TestCase):
         self.assertTrue(allPredictedItemsExist and allItemsWerePredicted)
 
     def run_file(self, filename):
-        print "Running test file: " + filename
+        if (os.path.exists(filename)):
+            self.reset_atom_spaces()
 
-        print os.path.realpath(filename)
+            self.chainer = Chainer(self.atomSpaceInputs,
+                                   stimulateAtoms=False, agent=self,
+                                   learnRuleFrequencies=False,
+                                   allow_output_with_variables=True,
+                                   allow_backchaining_with_variables=True)
 
-        self.reset_atom_spaces()
 
-        self.load_file_into_atomspace(filename, self.atomSpaceFileData)
+            self.load_file_into_atomspace(filename, self.atomSpaceFileData)
 
-        self.load_inputs()
-        self.load_outputs()
-        self.load_rules()
+            self.load_inputs()
+            self.load_outputs()
+            self.load_rules()
 
-        self.run_chaining_steps()
+            self.run_chaining_steps()
 
-        self.verify_result()
+            self.verify_result()
+        else:
+            print "File does not exist: " + filename
 
     def transfer_atom(self, new_atomspace, atom):
         """
@@ -345,10 +376,10 @@ class AllRules(object):
         similarity_types = [types.SimilarityLink, types.EquivalenceLink]
 
         for link_type in conditional_probability_types:
-            self.chainer.add_rule(InversionRule(self.chainer, link_type))
-            self.chainer.add_rule(DeductionRule(self.chainer, link_type))
-            self.chainer.add_rule(InductionRule(self.chainer, link_type))
-            self.chainer.add_rule(AbductionRule(self.chainer, link_type))
+            self.chainer.add_rule(InversionRule(self.chainer, link_type)) # Rule test exists.
+            self.chainer.add_rule(DeductionRule(self.chainer, link_type)) # Rule test exists.
+            self.chainer.add_rule(InductionRule(self.chainer, link_type)) # Rule test exists.
+            self.chainer.add_rule(AbductionRule(self.chainer, link_type)) # Rule test exists.
             # Seems better than Modus Ponens - it doesn't make anything up
             self.chainer.add_rule(TermProbabilityRule(self.chainer, link_type))
             self.chainer.add_rule(ModusPonensRule(self.chainer, link_type))
@@ -357,15 +388,15 @@ class AllRules(object):
         for link_type in similarity_types:
             # SimilarityLinks don't require an InversionRule obviously
             self.chainer.add_rule(
-                TransitiveSimilarityRule(self.chainer, link_type))
+                TransitiveSimilarityRule(self.chainer, link_type)) # Rule test exists.
             self.chainer.add_rule(
                 SymmetricModusPonensRule(self.chainer, link_type))
 
-        self.chainer.add_rule(EvaluationImplicationRule(self.chainer))
+        self.chainer.add_rule(EvaluationImplicationRule(self.chainer)) # No test, appears to produce a TV not new nodes.
 
         # These two Rules create mixed links out of intensional and
         # extensional links
-        self.chainer.add_rule(InheritanceRule(self.chainer))
+        self.chainer.add_rule(InheritanceRule(self.chainer)) # Rule test exists.
         self.chainer.add_rule(SimilarityRule(self.chainer))
 
         for link_type in conditional_probability_types:
@@ -384,6 +415,10 @@ class AllRules(object):
             self.chainer.add_rule(
                 boolean_rules.NegatedAndBulkEvaluationRule(self.chainer, N))
 
+        general_evaluation_to_member_rules = create_general_evaluation_to_member_rules(self.chainer)
+        for rule in general_evaluation_to_member_rules:
+            self.chainer.add_rule(rule)
+
         # create probabilistic logical links out of MemberLinks
 
         self.chainer.add_rule(AndEvaluationRule(self.chainer))
@@ -400,7 +435,7 @@ class AllRules(object):
         self.chainer.add_rule(
             IntensionalSimilarityEvaluationRule(self.chainer))
 
-        # self.member_rules = [EvaluationToMemberRule(self.chainer),
+        # self.member_rules = [GeneralEvaluationToMemberRule(self.chainer),
         #     MemberToEvaluationRule(self.chainer)]
         # self.member_rules += \
         #     create_general_evaluation_to_member_rules(self.chainer)

@@ -1,5 +1,5 @@
 /*
- * opencog/atomspace/ExectuionLink.cc
+ * opencog/atomspace/ExecutionLink.cc
  *
  * Copyright (C) 2009, 2013 Linas Vepstas
  * All Rights Reserved
@@ -36,7 +36,7 @@ ExecutionLink::ExecutionLink(const HandleSeq& oset,
     if ((2 != oset.size()) or
        (LIST_LINK != oset[1]->getType()))
     {
-        throw RuntimeException(TRACE_INFO, "ExectionLink must have schema and args!");
+        throw RuntimeException(TRACE_INFO, "ExecutionLink must have schema and args!");
     }
 }
 
@@ -46,7 +46,7 @@ ExecutionLink::ExecutionLink(Handle schema, Handle args,
     : Link(EXECUTION_LINK, schema, args, tv, av)
 {
     if (LIST_LINK != args->getType()) {
-        throw RuntimeException(TRACE_INFO, "ExectionLink must have schema and args!");
+        throw RuntimeException(TRACE_INFO, "ExecutionLink must have schema and args!");
     }
 }
 
@@ -85,7 +85,7 @@ Handle ExecutionLink::do_execute(AtomSpace* as, const HandleSeq& sna)
 {
     if (2 != sna.size())
     {
-        throw RuntimeException(TRACE_INFO, "Incorrect arity for an ExectionLink!");
+        throw RuntimeException(TRACE_INFO, "Incorrect arity for an ExecutionLink!");
     }
     return do_execute(as, sna[0], sna[1]);
 }
@@ -103,7 +103,7 @@ Handle ExecutionLink::do_execute(AtomSpace* as, Handle gsn, Handle args)
     }
     if (LIST_LINK != args->getType())
     {
-        throw RuntimeException(TRACE_INFO, "Expecting arguments to ExectionLink!");
+        throw RuntimeException(TRACE_INFO, "Expecting arguments to ExecutionLink!");
     }
 
     // Get the schema name.

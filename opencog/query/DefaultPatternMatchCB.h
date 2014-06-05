@@ -135,12 +135,19 @@ class DefaultPatternMatchCB :
 		}
 
 		/**
+		 * Called after a link has been grounded.  It offers
+		 * a second chance to reject a match, this time, based
+		 * on the grounding.
+		 */
+		virtual bool post_link_match(LinkPtr& lpat, LinkPtr& lsoln);
+
+		/**
 		 * Called to perform the actual search. This makes some default
 		 * assumptions about the kind of things that might be matched,
 		 * in order to drive a reasonably-fast search.
 		 */
 		virtual void perform_search(PatternMatchEngine *,
-		                            std::vector<Handle> &vars,
+		                            std::set<Handle> &vars,
 		                            std::vector<Handle> &clauses,
 		                            std::vector<Handle> &negations);
 

@@ -54,7 +54,7 @@ bool expand_deme(metapopulation& mp,
     // over exemplars until we find one that expands.
     // XXX When would one never expand?  Wouldn't that be a bug?
     while (1) {
-        pbscored_combo_tree_ptr_set_cit exemplar = mp.select_exemplar();
+        scored_combo_tree_ptr_set_cit exemplar = mp.select_exemplar();
 
         // Should have found something by now.
         if (exemplar == mp.end()) {
@@ -67,10 +67,10 @@ bool expand_deme(metapopulation& mp,
         }
 
         // if create_deme returned true, we are good to go.
-        if (mp._dex.create_demes(get_tree(*exemplar), stats.n_expansions))
+        if (mp._dex.create_demes(exemplar->get_tree(), stats.n_expansions))
             break;
 
-        logger().error() << "Exemplar: " << get_tree(*exemplar);
+        logger().error() << "Exemplar: " << exemplar->get_tree();
         OC_ASSERT(false, "Exemplar failed to expand!\n");
     }
 
@@ -146,7 +146,7 @@ void local_moses(metapopulation& mp,
                << "\t" << ((int) stats.elapsed_secs)  // wall-clock time.
                << "\t" << mp.size()       // size of the metapopulation
                << "\t" << mp.best_score() // score of the highest-ranked exemplar.
-               << "\t" << get_complexity(mp.best_composite_score()); // as above.
+               << "\t" << mp.best_composite_score().get_complexity(); // as above.
             if (os) {
                 ss << "\t" << os->field_set_size  // number of bits in the knobs
                    << "\t" << os->nsteps  // number of iterations of optimizer

@@ -34,16 +34,23 @@ using namespace reduct;
 
 int moses_exec(int argc, char** argv)
 {
+    option_manager mgr;
+
     problem_params pms;
-    pms.parse_options(argc, argv);
 
-    register_demo_problems();
-    register_table_problems();
+    problem_manager pmr;
+    register_table_problems(pmr, mgr);
+    register_demo_problems(pmr, mgr);
 
-    problem_base* probm = find_problem(pms.problem);
+    mgr.register_options(&pms);
+
+    mgr.init_options();
+    mgr.parse_options(argc, argv);
+
+    problem_base* probm = pmr.find_problem(pms.problem);
     if (probm)
     {
-        probm->run(pms);
+        probm->run(&pms);
         return 0;
     }
 

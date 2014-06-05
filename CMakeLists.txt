@@ -10,7 +10,7 @@
 #
 include(lib/Summary.cmake)
 
-# Seems to work fine with cmake-2.6 but previously, cmake-2.8 was required!?
+# Seems to work fine with cmake-2.6
 CMAKE_MINIMUM_REQUIRED(VERSION 2.6)
 IF (COMMAND CMAKE_POLICY)
 	CMAKE_POLICY(SET CMP0003 NEW)
@@ -52,6 +52,12 @@ SET(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/lib/")
 # Detect different compilers and OS'es, tweak flags as necessary.
 
 IF (CMAKE_COMPILER_IS_GNUCXX)
+	# aiiee cmake version 2.8.8 or newer is needed for below to
+	# work...
+	# IF (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 4.6.4)
+	#	MESSAGE(FATAL_ERROR "GCC version must be at least 4.6.4!")
+	# ENDIF (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 4.6.4)
+
 	IF (APPLE)
 		SET(CMAKE_C_FLAGS "-Wall -Wno-long-long -Wno-conversion")
 		SET(CMAKE_C_FLAGS_DEBUG "-O0 -g")
@@ -263,6 +269,17 @@ IF (IBERTY_FOUND)
 ELSE (IBERTY_FOUND)
 	MESSAGE(STATUS "Libiberty-dev missing: No pretty stack-trace printing.")
 ENDIF (IBERTY_FOUND)
+
+
+# Lapack is needed for BLOPEX
+FIND_PACKAGE(LAPACK)
+IF (LAPACK_FOUND)
+	# MESSAGE(STATUS "LAPACK found.")
+	ADD_DEFINITIONS(-DHAVE_LAPACK)
+	SET(HAVE_LAPACK 1)
+ELSE (LAPACK_FOUND)
+	MESSAGE(STATUS "LAPACK missing: needed for blopex-based clustering.")
+ENDIF (LAPACK_FOUND)
 
 
 # Link-Gramar is needed for the Viterbi parser
@@ -722,6 +739,7 @@ ADD_SUBDIRECTORY(doc EXCLUDE_FROM_ALL)
 # Show a summary of what we got
 SUMMARY_ADD("AtomSpace" "A weighted and typed hypergraph database" HAVE_ATOMSPACE)
 SUMMARY_ADD("Attention" "Agents for attention allocation dynamics" HAVE_ATTENTION)
+SUMMARY_ADD("Blopex" "BLOPEX block eigenvalue solver" HAVE_LAPACK)
 SUMMARY_ADD("ComboReduct" "Library for reduction of combo program trees" HAVE_COMBOREDUCT)
 SUMMARY_ADD("Cython bindings" "Cython (python) bindings" HAVE_CYTHON)
 SUMMARY_ADD("Dim. Embedding" "Compute dimensional embedding of the AtomSpace" HAVE_DIMEMBED)

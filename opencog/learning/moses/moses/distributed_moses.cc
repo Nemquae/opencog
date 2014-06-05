@@ -226,7 +226,7 @@ bool is_running(const proc_map::value_type& pmv)
     return is_being_written(get_tmp(pmv), get_pid(pmv));
 }
 
-void parse_result(istream& in, metapop_candidates& candidates, int& evals)
+void parse_result(istream& in, scored_combo_tree_set& candidates, int& evals)
 {
     in.seekg(0);
     while (!in.eof()) {
@@ -255,12 +255,10 @@ void parse_result(istream& in, metapop_candidates& candidates, int& evals)
             score_t bpenalty;
             in >> bpenalty;
 
-            penalized_bscore pbs;
-            pbs.second = complexity_penalty;
+            behavioral_score bscore;
             if (0 != bpenalty) {
                 OC_ASSERT(bpenalty == complexity_penalty,
                           "Behavioural score is mangled!");
-                behavioral_score &bscore = pbs.first;
                 istreamContainer(in, std::back_inserter(bscore), "[", "]");
             } else {
                 // Discard remaining characters till end-of-line.
@@ -268,16 +266,15 @@ void parse_result(istream& in, metapop_candidates& candidates, int& evals)
             }
             // insert read element in candidates
             composite_score cs(score, complexity, complexity_penalty);
-            metapop_candidates::value_type candidate = {tr, {{pbs, cs},
-                                                             demeID_t()}};
+            scored_combo_tree candidate =
+                  scored_combo_tree(tr, demeID_t(), cs, bscore);
             candidates.insert(candidate);
 
             if (logger().isFineEnabled()) {
                 logger().fine("Parsed candidate:");
                 stringstream ss;
-                ostream_combo_tree_composite_pbscore(ss, get_tree(candidate),
-                                                     get_composite_penalized_bscore(candidate),
-                                                     true, true);
+                ostream_scored_combo_tree(ss, candidate,
+                              true, true);
                 logger().fine(ss.str());
             }
         }
@@ -285,7 +282,7 @@ void parse_result(istream& in, metapop_candidates& candidates, int& evals)
 };
 
 void parse_result(const proc_map::value_type& pmv, 
-                  metapop_candidates& candidates, int& evals)
+                  scored_combo_tree_set& candidates, int& evals)
 {
     FILE* fp = get_file(pmv);
     // build istream from fp
@@ -365,7 +362,7 @@ void distributed_moses(metapopulation& mp,
     const boost::program_options::variables_map& vm = pa.vm;
     const jobs_t& jobs = pa.jobs;
 
-    typedef pbscored_combo_tree_ptr_set_cit mp_cit;
+    typedef scored_combo_tree_ptr_set_cit mp_cit;
 
     host_proc_map hpm = init(jobs);
 
@@ -394,7 +391,7 @@ void distributed_moses(metapopulation& mp,
 
             const string& hostname = get_hostname(*hpm_it);
             unsigned n_jobs = jobs.find(hostname)->second;
-            const combo_tree& tr = get_tree(*exemplar);
+            const combo_tree& tr = exemplar->get_tree();
 
             string cmdline =
                 build_cmdline(vm, tr, hostname, n_jobs,
@@ -425,7 +422,7 @@ void distributed_moses(metapopulation& mp,
                 found_one = true;
 
                 // parse the result
-                metapop_candidates candidates;
+                scored_combo_tree_set candidates;
                 int evals;
 
                 logger().info("Parsing results from PID %d file %s",
@@ -435,10 +432,8 @@ void distributed_moses(metapopulation& mp,
                 stats.n_evals += evals;
 
                 // update best and merge
-                pbscored_combo_tree_set mc(candidates.begin(), candidates.end());
-
-                mp.update_best_candidates(mc);
-                mp.merge_candidates(mc);
+                mp.update_best_candidates(candidates);
+                mp.merge_candidates(candidates);
                 mp.log_best_candidates();
 
                 // Remove proc info from pm

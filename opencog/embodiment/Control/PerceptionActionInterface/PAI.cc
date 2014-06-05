@@ -1578,7 +1578,7 @@ void PAI::processAgentActionPlanResult(char* agentID, unsigned long tsValue, con
         }
     }
 
-    logger().warn("PAI - pet id %s (%s), name: %s, status: %s, statusCode: %d", agentID, internalAgentId.c_str(), name.c_str(), status, statusCode);
+    logger().warn("PAI - avatar id %s (%s), name: %s, status: %s, statusCode: %d", agentID, internalAgentId.c_str(), name.c_str(), status, statusCode);
 
     // This is a feedback for a sent action plan
     XMLString::transcode(SEQUENCE_ATTRIBUTE, tag, PAIUtils::MAX_TAG_LENGTH);
@@ -3367,9 +3367,7 @@ void PAI::setActionPlanStatus(ActionPlanID& planId, unsigned int sequence,
             }
         }
 
-        set<unsigned int>::const_iterator itr;
-        for (itr = seqNumbers.begin(); itr != seqNumbers.end(); itr++) {
-            unsigned int seqNumber = *itr;
+        for (unsigned seqNumber : seqNumbers) {
             const char* predicateName = NULL;
 
             switch (statusCode) {
