@@ -28,7 +28,6 @@
 #include <opencog/learning/moses/main/problem-params.h>
 #include <opencog/learning/moses/moses/types.h>
 #include <opencog/learning/moses/scoring/behave_cscore.h>
-#include <opencog/learning/moses/scoring/boosting_ascore.h>
 #include <opencog/learning/moses/scoring/bscores.h>
 #include <opencog/learning/moses/example-progs/scoring_iterators.h>
 
@@ -107,18 +106,18 @@ void bool_problem_base::run(option_base* ob)
     }
 
     logical_bscore bscore = get_bscore(_dparms.problem_size);
+    if (pms.meta_params.do_boosting) bscore.use_weighted_scores();
 
     type_tree sig = gen_signature(id::boolean_type, get_arity(_dparms.problem_size));
     unsigned as = alphabet_size(sig, pms.ignore_ops);
     set_noise_or_ratio(bscore, as, pms.noise, pms.complexity_ratio);
 
-    boosting_ascore ascore(bscore.size());
-    behave_cscore cscore(bscore, ascore);
+    behave_cscore cscore(bscore);
     metapop_moses_results(pms.exemplars, sig,
                           *pms.bool_reduct, *pms.bool_reduct_rep,
                           cscore,
                           pms.opt_params, pms.hc_params,
-                          pms.deme_params, pms.meta_params,
+                          pms.deme_params, pms.filter_params, pms.meta_params,
                           pms.moses_params, pms.mmr_pa);
 }
 
@@ -204,10 +203,10 @@ class mux_problem : public bool_problem_base
             if (4 < sz) {
                 // A mux of 5 would multiplex 32 bits, requiring a truth
                 // table of 2^37 rows ... which is some many umpteen gigabytes.
-                logger().warn() << 
+                logger().warn() <<
                     "Error: maximum mux demo problem size is 4;\n"
                     "use the -k flag to pick a smaller size";
-                std::cerr << 
+                std::cerr <<
                     "Error: maximum mux demo problem size is 4;\n"
                     "use the -k flag to pick a smaller size" << std::endl;
                 exit(-1);
@@ -276,13 +275,12 @@ void polynomial_problem::run(option_base* ob)
     OC_ASSERT(not pms.meta_params.do_boosting, "Boosting not supported for this problem!");
 
     set_noise_or_ratio(bscore, as, pms.noise, pms.complexity_ratio);
-    simple_ascore ascore;
-    behave_cscore cscore(bscore, ascore);
+    behave_cscore cscore(bscore);
     metapop_moses_results(pms.exemplars, tt,
                           *pms.contin_reduct, *pms.contin_reduct,
                           cscore,
                           pms.opt_params, pms.hc_params,
-                          pms.deme_params, pms.meta_params,
+                          pms.deme_params, pms.filter_params, pms.meta_params,
                           pms.moses_params, pms.mmr_pa);
 }
 
@@ -328,7 +326,7 @@ void combo_problem_base::check_args(problem_params& pms)
         std::cerr << "The combo tree " << tr << " is not well formed." << std::endl;
         exit(-1);
     }
-    
+
     combo::arity_t arity = type_tree_arity(tt);
 
     // If the user specifies the combo program from bash or similar
@@ -392,13 +390,12 @@ void combo_problem::run(option_base* ob)
     if (output_type == id::boolean_type) {
         // @todo: Occam's razor and nsamples is not taken into account
         logical_bscore bscore(tr, arity);
-        simple_ascore ascore;
-        behave_cscore cscore(bscore, ascore);
+        behave_cscore cscore(bscore);
         metapop_moses_results(pms.exemplars, tt,
                               *pms.bool_reduct, *pms.bool_reduct_rep,
                               cscore,
                               pms.opt_params, pms.hc_params,
-                              pms.deme_params, pms.meta_params,
+                              pms.deme_params, pms.filter_params, pms.meta_params,
                               pms.moses_params, pms.mmr_pa);
     }
     else if (output_type == id::contin_type) {
@@ -436,13 +433,12 @@ void combo_problem::run(option_base* ob)
 
         contin_bscore bscore(ot, it);
         set_noise_or_ratio(bscore, as, pms.noise, pms.complexity_ratio);
-        simple_ascore ascore;
-        behave_cscore cscore(bscore, ascore);
+        behave_cscore cscore(bscore);
         metapop_moses_results(pms.exemplars, tt,
                               *pms.contin_reduct, *pms.contin_reduct,
                               cscore,
                               pms.opt_params, pms.hc_params,
-                              pms.deme_params, pms.meta_params,
+                              pms.deme_params, pms.filter_params, pms.meta_params,
                               pms.moses_params, pms.mmr_pa);
     } else {
         logger().error() << "Error: combo_problem: type " << tt << " not supported.";
@@ -490,13 +486,12 @@ void ann_combo_problem::run(option_base* ob)
     set_noise_or_ratio(bscore, as, pms.noise, pms.complexity_ratio);
 
     OC_ASSERT(not pms.meta_params.do_boosting, "Boosting not supported for this problem!");
-    simple_ascore ascore;
-    behave_cscore cscore(bscore, ascore);
+    behave_cscore cscore(bscore);
     metapop_moses_results(pms.exemplars, tt,
                           *pms.contin_reduct, *pms.contin_reduct,
                           cscore,
                           pms.opt_params, pms.hc_params,
-                          pms.deme_params, pms.meta_params,
+                          pms.deme_params, pms.filter_params, pms.meta_params,
                           pms.moses_params, pms.mmr_pa);
 }
 

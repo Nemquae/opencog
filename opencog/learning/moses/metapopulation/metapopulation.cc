@@ -35,13 +35,15 @@ using namespace combo;
 
 metapopulation::metapopulation(const std::vector<combo_tree>& bases,
                behave_cscore& sc,
-               const metapop_parameters& pa) :
+               const metapop_parameters& pa,
+               const subsample_deme_filter_parameters& subp) :
     _cached_dst(pa.diversity),
     _params(pa),
+    _filter_params(subp),
     _cscorer(sc),
     _merge_count(0),
     _best_cscore(worst_composite_score),
-    _ensemble(sc)
+    _ensemble(sc, pa.ensemble_params)
 {
     init(bases);
 }
@@ -49,13 +51,15 @@ metapopulation::metapopulation(const std::vector<combo_tree>& bases,
 
 metapopulation::metapopulation(const combo_tree& base,
                behave_cscore& sc,
-               const metapop_parameters& pa) :
+               const metapop_parameters& pa,
+               const subsample_deme_filter_parameters& subp) :
     _cached_dst(pa.diversity),
     _params(pa),
+    _filter_params(subp),
     _cscorer(sc),
     _merge_count(0),
     _best_cscore(worst_composite_score),
-    _ensemble(sc)
+    _ensemble(sc, pa.ensemble_params)
 {
     std::vector<combo_tree> bases(1, base);
     init(bases);
@@ -67,9 +71,13 @@ void metapopulation::init(const std::vector<combo_tree>& exemplars)
 {
     scored_combo_tree_set candidates;
     for (const combo_tree& base : exemplars) {
-
         composite_score csc(_cscorer.get_cscore(base));
-        scored_combo_tree sct(base, demeID_t(), csc);
+
+        // The behavioral score must be recomputed here, so we can
+        // store it in case diversity preservation is used
+        behavioral_score bs(_cscorer.get_bscore(base));
+
+        scored_combo_tree sct(base, demeID_t(), csc, bs);
 
         candidates.insert(sct);
     }
@@ -116,7 +124,8 @@ scored_combo_tree_ptr_set::const_iterator metapopulation::select_exemplar()
     // though, the score is invalid.
     if (size() == 1) {
         scored_combo_tree_ptr_set::const_iterator selex = _scored_trees.cbegin();
-        if (_params.revisit + 1 > _visited_exemplars[*selex]) // not enough visited
+        if(_params.revisit < 0 or
+           (_params.revisit + 1 > (int)_visited_exemplars[*selex])) // not enough visited
             _visited_exemplars[*selex]++;
         else selex = _scored_trees.cend();    // enough visited
 
@@ -137,7 +146,8 @@ scored_combo_tree_ptr_set::const_iterator metapopulation::select_exemplar()
         score_t sc = bsct.get_penalized_score();
 
         // Skip exemplars that have been visited enough
-        if (_params.revisit + 1 > _visited_exemplars[bsct]) {
+        if (_params.revisit < 0 or
+            (_params.revisit + 1 > (int)_visited_exemplars[bsct])) {
             probs.push_back(sc);
             found_exemplar = true;
             if (highest_score < sc) highest_score = sc;
@@ -207,7 +217,7 @@ composite_score metapopulation::best_composite_score() const
     if (not _params.do_boosting)
         return _best_cscore;
 
-    // XXX FIXME should probably not recompute every time ... 
+    // XXX FIXME should probably not recompute every time ...
     // need to figure who is calling this method, and what they are expecting.
     return _cscorer.get_cscore(_ensemble.get_ensemble());
 }
@@ -223,10 +233,10 @@ const scored_combo_tree_set& metapopulation::best_candidates() const
     return _best_candidates;
 }
 
-/** 
+/**
  * Return the best combo tree (shortest best candidate).
  */
-combo_tree metapopulation::best_tree() const
+const combo_tree& metapopulation::best_tree() const
 {
     if (_params.do_boosting) {
         return _ensemble.get_weighted_tree();

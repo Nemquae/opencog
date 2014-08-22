@@ -34,7 +34,9 @@ namespace opencog { namespace moses {
 
 using combo::combo_tree;
 using combo::arity_t;
+using combo::count_t;
 using combo::CTable;
+using combo::TTable;
 
 /// Used to define the complexity scoring component given that p is the
 /// probability of having an observation being wrong (see the comment
@@ -54,7 +56,7 @@ score_t contin_complexity_coef(unsigned alphabet_size, double stdev);
 /// A behavioral score is a vector of scores, one per sample of a dataset.
 struct bscore_base : public std::unary_function<combo_tree, behavioral_score>
 {
-    bscore_base() : _complexity_coef(0.0), _size(0) {};
+    bscore_base() : _return_weighted_score(false), _complexity_coef(0.0), _size(0) {};
     virtual ~bscore_base() {};
 
     /// Return the behavioral score for the combo_tree
@@ -72,6 +74,11 @@ struct bscore_base : public std::unary_function<combo_tree, behavioral_score>
     /// possible score has been reached.
     virtual behavioral_score best_possible_bscore() const = 0;
 
+    /// Return the worst possible bscore achievable with this fitness
+    /// function. This is needed during boosting, to ascertain if at
+    // least half the answers are correct.
+    virtual behavioral_score worst_possible_bscore() const;
+
     /// Return the smallest change in the score which can be considered
     /// to be an improvement over the previous score. This is useful for
     /// avoiding local maxima which have a very flat top. That is, where
@@ -81,6 +88,56 @@ struct bscore_base : public std::unary_function<combo_tree, behavioral_score>
     /// time by terminating the search when the imrpovements are smaller
     /// than the min_improv(). Returns 0.0 by default.
     virtual score_t min_improv() const { return 0.0; }
+
+    /// Return weighted scores instead of flat scores.  The weighted
+    /// scores are needed by the boosting algorithms; the unweighted
+    /// scores are needed to find out what the "actual" score would be.
+    void use_weighted_scores() { _return_weighted_score = true; }
+
+    /// Return the (possbily  weighted) sum of the behavioral score.
+    /// If _return_weighted_score is false, then this returns the "flat"
+    /// score, a simple sum over all samples:
+    /// 
+    ///      score = sum_x BScore(x)
+    /// 
+    /// Otherwise, it returns a weighted sum of the bscore:
+    /// 
+    ///      score = sum_x weight(x) * BScore(x)
+    ///
+    /// Each element in the bscore typically corresponds to a sample in
+    /// a supervised training set, that is, a row of a table contianing
+    /// the training data.  By default, the weight is 1.0 for each entry.
+    /// The intended use of the weights is for boosting, so that the
+    /// the score for erroneous rows can be magnified, such as in AdaBoost.
+    ///
+    /// See, for example, http://en.wikipedia.org/wiki/AdaBoost --
+    /// However, CAUTION! That wikipedia article currently (as of July
+    /// 2014) contains serious, fundamental mistakes in it's desciption
+    /// of the boosting algo!
+    virtual score_t sum_bscore(const behavioral_score&) const;
+
+    /// A vector of per-bscore weights, used to tote up the behavioral
+    /// score into a single number.  This returns a reference, not const,
+    /// allowing them to be modified in-place.
+    // XXX TODO should be a std::valarray not a vector.
+    std::vector<double>& get_weights() { return _weights; }
+
+    /// Reset the weights.
+    void reset_weights();
+
+    /// Return the amount by which the bscore differs from a perfect
+    /// score.  This is used by the boosting algorithm to weight the
+    /// a scored combo tree.
+    ///
+    /// The is normalized so that 0.0 stands for a perfect score (all
+    /// answers are the best possible), a value of 0.5 stands for a
+    /// score that corresponds to "random guessing", and 1.0 corresponds
+    /// to a worst-possible score (all answers are the worst possible.)
+    /// This error amount does not have to be a metric or distance
+    /// measure, nor does it have to be linear; however, boosting will
+    /// probably work better if the error is vaguely metric-like and
+    /// quasi-linear.
+    virtual score_t get_error(const behavioral_score&) const;
 
     /// Indicate a set of features that should be ignored during scoring,
     /// The features are indicated as indexes, starting from 0.
@@ -118,6 +175,22 @@ struct bscore_base : public std::unary_function<combo_tree, behavioral_score>
     /// empty set has the effect of restoring all ignored rows.
     virtual void ignore_rows(const std::set<unsigned>&) const {}
 
+    // Like ignore_rows but consider timestamps instead of indexes
+    virtual void ignore_rows_at_times(const std::set<TTable::value_type>&) const {}
+
+    // Return the uncompressed size of the CTable
+    virtual unsigned get_ctable_usize() const {
+        OC_ASSERT(false, "You must implement me in the derived class");
+        return 0U;
+    }
+
+    // Return the original CTable
+    virtual const CTable& get_ctable() const {
+        static const CTable empty_ctable;
+        OC_ASSERT(false, "You must implement me in the derived class");
+        return empty_ctable;
+    }
+
     /// Get the appropriate complexity measure for the indicated combo
     /// tree. By default, this is the tree complexity, although it may
     /// depend on the scorer.
@@ -149,13 +222,14 @@ struct bscore_base : public std::unary_function<combo_tree, behavioral_score>
     virtual void set_complexity_coef(unsigned alphabet_size, float p);
 
 protected:
+    bool _return_weighted_score;
     score_t _complexity_coef;
-    mutable size_t _size;
+    mutable size_t _size; // mutable to work around const bugs
+    std::vector<double> _weights;
 };
 
-
 /// Base class for fitness functions that use a ctable. Provides useful
-/// table compression
+/// table compression.
 struct bscore_ctable_base : public bscore_base
 {
     bscore_ctable_base(const CTable&);
@@ -169,12 +243,14 @@ struct bscore_ctable_base : public bscore_base
     /// reducing evaluation time. For tables with tens of thousands of
     /// uncompressed rows, this can provide a significant speedup when
     /// evaluating a large number of instances.
-    ///
     void ignore_cols(const std::set<arity_t>&) const;
 
     /// In case one wants to evaluate the fitness on a subset of the
     /// data, one can provide a set of row indexes to ignore.
     void ignore_rows(const std::set<unsigned>&) const;
+
+    // Like ignore_rows but consider timestamps instead of indexes
+    void ignore_rows_at_times(const std::set<TTable::value_type>&) const;
 
     // Return the uncompressed size of the CTable
     unsigned get_ctable_usize() const;
@@ -194,33 +270,12 @@ protected:
     // A copy of wrk_ctable prior to ignore_rows() being applied.  This
     // allows ignore_rows() to be called multiple times, without forcing
     // a complete recalculation.
-    mutable CTable _all_rows_wrk_ctable;
+    mutable CTable _all_rows_wrk_ctable; // mutable to work around const bugs.
 
-    mutable size_t _ctable_usize;   // uncompressed size of ctable
+    mutable size_t _ctable_usize;    // uncompressed size of ctable
+    mutable count_t _ctable_weight;  // Total weight of all rows in table.
 
-    // for debugging, keep that around till we fix best_possible_bscore
-    // mutable CTable fully_filtered_ctable;
-};
-
-
-/// Abstract base class for summing behavioral scores.
-// XXX TODO FIXME: this should probably be completely removed,
-// and replaced by boosting_ascore everywhere, and boosting_ascore
-// should probably be renamed to weighted_score or something like
-// that ... in particular, simple_ascore should be killed.
-struct ascore_base : public std::unary_function<combo_tree, composite_score>
-{
-    /// Sum up the behavioral score
-    virtual score_t operator()(const behavioral_score&) const = 0;
-
-    virtual ~ascore_base(){}
-};
-
-/// Simplest ascore, it just totals up the bscore.
-struct simple_ascore : ascore_base
-{
-    /// Sum up the behavioral score
-    virtual score_t operator()(const behavioral_score&) const;
+    void recompute_weight() const;   // recompute _ctable_weight
 };
 
 // helper to log a combo_tree and its behavioral score

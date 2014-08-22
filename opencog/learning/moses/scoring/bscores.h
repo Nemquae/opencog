@@ -53,14 +53,24 @@ struct logical_bscore : public bscore_base
 {
     template<typename Func>
     logical_bscore(const Func& func, int a)
-            : _target(func, a), _arity(a) { _size = _target.size(); }
+            : _target(func, a), _arity(a)
+    {
+        _size = _target.size();
+        reset_weights();
+    }
     logical_bscore(const combo_tree& tr, int a)
-            : _target(tr, a), _arity(a) { _size = _target.size(); }
+            : _target(tr, a), _arity(a)
+    {
+        _size = _target.size();
+        reset_weights();
+    }
 
     behavioral_score operator()(const combo_tree&) const;
     behavioral_score operator()(const scored_combo_tree_set&) const;
 
     behavioral_score best_possible_bscore() const;
+    behavioral_score worst_possible_bscore() const;
+    score_t get_error(const behavioral_score&) const;
 
     score_t min_improv() const;
 
@@ -354,20 +364,33 @@ struct ctruth_table_bscore : public bscore_base
                         arity_t arity,
                         int nsamples = -1)
         : _ctable(func, arity, nsamples)
-    { _size = _ctable.size(); }
+    {
+        _size = _ctable.size();
+        reset_weights();
+        set_best_possible_bscore();
+    }
+
     ctruth_table_bscore(const CTable& ctt) : _ctable(ctt)
-    { _size = _ctable.size(); }
+    {
+        _size = _ctable.size();
+        reset_weights();
+        set_best_possible_bscore();
+    }
 
     behavioral_score operator()(const combo_tree& tr) const;
+    behavioral_score operator()(const scored_combo_tree_set&) const;
 
     // Return the best possible bscore. Used as one of the
     // termination conditions (when the best bscore is reached).
     behavioral_score best_possible_bscore() const;
+    behavioral_score worst_possible_bscore() const;
 
     score_t min_improv() const;
 
 protected:
     CTable _ctable;
+    behavioral_score _best_possible_score;
+    void set_best_possible_bscore();
 };
 
 /**
@@ -404,7 +427,6 @@ struct enum_table_bscore : public bscore_base
     // Return the best possible bscore. Used as one of the
     // termination conditions (when the best bscore is reached).
     behavioral_score best_possible_bscore() const;
-    behavioral_score worst_possible_bscore() const;
 
     virtual score_t min_improv() const;
 

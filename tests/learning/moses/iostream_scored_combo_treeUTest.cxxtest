@@ -46,7 +46,7 @@ public:
 
         // build the scored_combo_tree
         composite_score cs(sc, cpx, cpx_penalty, diversity_penalty);
-        scored_combo_tree bct(tr, demeID_t(), cs, bs);
+        scored_combo_tree bct(tr, demeID_t(1,2,3), cs, bs);
 
         // build expected string
         std::stringstream oss;
@@ -54,15 +54,15 @@ public:
         std::cout << "original tree = " << oss.str() << std::endl;
 
         // check that it is the same object parse by istream_scored_combo_tree
-        std::stringstream iss;
-        iss << oss.str();
-        scored_combo_tree parsed_bct = istream_scored_combo_tree(iss);
+        scored_combo_tree parsed_bct = string_to_scored_combo_tree(oss.str());
 
         std::cout << "parsed tree = " << parsed_bct << std::endl;
         // check the combo trees
         TS_ASSERT_EQUALS(bct.get_tree(), parsed_bct.get_tree());
         // check the composite scores
         TS_ASSERT_EQUALS(bct.get_composite_score(), parsed_bct.get_composite_score());
+        // check the demeID
+        TS_ASSERT_EQUALS(bct.get_demeID(), parsed_bct.get_demeID());
         // check the behavioral score
         TS_ASSERT_EQUALS(bct.get_bscore(), parsed_bct.get_bscore());        
     }

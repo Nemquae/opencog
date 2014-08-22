@@ -91,15 +91,19 @@ public:
         cout << BOOST_CURRENT_FUNCTION << endl;
         string data_file_path("-i" + MOSESUTest_dir + "dataset.csv");
         string max_evals("-m1000");
-        moses_test_score({data_file_path, max_evals}, -3);
+        // The expected score is now 0 and not -3, since its relative
+        // to the best-possible-score, which is -3.
+        moses_test_score({data_file_path, max_evals}, 0);
     }
     void test_it_target_ignore() {
         cout << BOOST_CURRENT_FUNCTION << endl;
         // try to predict arg1 given arg2
         string data_file_path("-i" + MOSESUTest_dir + "dataset.csv"),
             max_evals("-m1000"), target("-uarg2"), ignore_feature("-Yres");
+        // The expected score is now 0 and not -3, since its relative
+        // to the best-possible-score, which is -3.
         moses_test_score({data_file_path, max_evals, target, ignore_feature},
-                         -3);
+                         0);
     }
 
     /* SR is polynomial regression; it has a very deceptive scoring
@@ -151,7 +155,9 @@ public:
         string tr1_str("or(and(!$1 $2) and($1 !$2))");
         string tr2_str("and(or(!$1 !$2) or($1 $2))");
         string data_file_path("-i" + MOSESUTest_dir + "KL_test.csv");
-        moses_test_combo({"-Hip", data_file_path, "-m500", "-l debug", "-U0", "-X0", "-z100000"},
+        moses_test_combo({"-Hip", data_file_path, "-m500", "-l debug",
+                          "-U0", "-X0", "-z100000",
+                          "-q0.2", "-w0.8"},
                          {tr1_str, tr2_str});
     }
     void test_multi_kl() {
@@ -159,7 +165,11 @@ public:
         string tr1_str("or(and(!$1 $2) and($1 !$2))");
         string tr2_str("and(or(!$1 !$2) or($1 $2))");
         string data_file_path("-i" + MOSESUTest_dir + "KL_test.csv");
-        moses_test_combo({"-Hip", data_file_path,  data_file_path, "-m500", "-l debug", "-U0", "-X0", "-z100000"}, {tr1_str, tr2_str});
+        moses_test_combo({"-Hip", data_file_path,  data_file_path,
+                          "-m500", "-l debug", "-U0", "-X0",
+                          "-z100000",
+                          "-q0.2", "-w0.8"},
+                          {tr1_str, tr2_str});
     }
     
     void test_precision() {
@@ -175,18 +185,6 @@ public:
         moses_test_combo({"-Hpre", data_file_path, "-m100", "-q0.2", "-w0.5", "-Q-1", "-z10000"}, {tr_str});
     }    
 
-    void test_contin_precision() {
-        cout << BOOST_CURRENT_FUNCTION << endl;
-        string tr_str("$2");
-        string data_file_path("-i" + MOSESUTest_dir + "contin_precision.csv");
-        moses_test_combo({"-Hpre", data_file_path,  "-m100", "-q0.2", "-w0.5", "-Q1", "-z10000"}, {tr_str});
-    }
-    void test_contin_negative_predictive_value() {
-        cout << BOOST_CURRENT_FUNCTION << endl;
-        string tr_str("$1"),
-            data_file_path("-i" + MOSESUTest_dir + "contin_precision.csv");
-        moses_test_combo({"-Hpre", data_file_path, "-m100", "-q0.2", "-w0.5", "-Q-1", "-z10000"}, {tr_str});
-    }
     void test_output_labels() {
         cout << BOOST_CURRENT_FUNCTION << endl;
         string tr_str("and($arg1 $arg2)"),

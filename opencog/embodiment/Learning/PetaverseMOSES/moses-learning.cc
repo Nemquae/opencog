@@ -79,9 +79,8 @@ moses_learning::moses_learning(int nepc,
     for (combo_tree_ns_set_it i = actions.begin(); i != actions.end(); ++i)
         std::cout << "action: " << *i << std::endl;
 
-    ascore = new simple_ascore();
     bscore = new petaverse_bscore(_fitness_estimator);
-    cscore = new behave_cscore(*bscore, *ascore);
+    cscore = new behave_cscore(*bscore);
     climber = new hill_climbing;
     _demeparms = new deme_parameters;
     _metaparms = new metapop_parameters;
@@ -104,7 +103,6 @@ moses_learning::~moses_learning()
 {
     delete cscore;
     delete bscore;
-    delete ascore;
     delete climber;
     if (_dex)
         delete _dex;
@@ -195,16 +193,14 @@ void moses_learning::operator()()
 
         // learning time is uncapped.
         time_t max_time = INT_MAX;
-        auto evals = _dex->optimize_demes(max_for_generation
-                                                  - _stats.n_evals,
-                                                  max_time);
-        int o = boost::accumulate(evals, 0);
-        std::cout << "number of evaluations: " << o << std::endl;
+        _dex->optimize_demes(max_for_generation - _stats.n_evals, max_time);
+        unsigned evals = _dex->total_evals();
+        std::cout << "number of evaluations: " << evals << std::endl;
 
-        if (o < 0)
-            _hcState = HC_FINISH_CANDIDATES;
+        // if (evals < 0)
+        //     _hcState = HC_FINISH_CANDIDATES;
 
-        _stats.n_evals += o;
+        _stats.n_evals += evals;
 
         //print the generation number and a best solution
 //          std::cout << "EST sampled " << metapop->n_evals()
@@ -333,11 +329,9 @@ void moses_learning::reset_estimator()
 
     delete cscore;
     delete bscore;
-    delete ascore;
 
-    ascore = new simple_ascore();
     bscore = new petaverse_bscore(_fitness_estimator);
-    cscore = new behave_cscore(*bscore, *ascore); 
+    cscore = new behave_cscore(*bscore); 
 
     //we get restarted from the best program so far
     _center = (_best_program.empty() ? _best_program_estimated : _best_program);

@@ -24,7 +24,8 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#include <boost/accumulators/accumulators.hpp>
+#include <math.h>
+
 #include <boost/range/algorithm_ext/push_back.hpp>
 #include <boost/range/irange.hpp>
 
@@ -76,6 +77,15 @@ bscore_base::operator()(const scored_combo_tree_set& ensemble) const
     return behavioral_score();
 }
 
+behavioral_score
+bscore_base::worst_possible_bscore() const
+{
+    // Can't assert; this will fail during ensemble setup.
+    // OC_ASSERT(false, "Worst possible score not implemented for bscorer %s",
+    //     typeid(*this).name());
+    return behavioral_score();
+}
+
 /**
  * Compute the average (weighted) complexity of all the trees in the
  * ensemble.  XXX this is probably wrong, we should probably do something
@@ -99,21 +109,67 @@ complexity_t bscore_base::get_complexity(const scored_combo_tree_set& ensemble) 
     return (complexity_t) floor (cpxy / norm + 0.5);
 }
 
-score_t simple_ascore::operator()(const behavioral_score& bs) const
+score_t
+bscore_base::get_error(const behavioral_score&) const
 {
-    return boost::accumulate(bs, 0.0);
+    OC_ASSERT(false, "score error not implemented for bscorer %s",
+        typeid(*this).name());
+    return -1.0;
 }
+
+score_t bscore_base::sum_bscore(const behavioral_score& bs) const
+{
+    // Don't use weights if not boosting.
+    if (not _return_weighted_score or _size == 0 or _weights.size() == 0)
+        return boost::accumulate(bs, 0.0);
+
+    size_t i=0;
+    score_t res = 0.0;
+    for (; i<_size; i++) {
+        res += _weights[i] * bs[i];
+    }
+
+    // Any extra penalties tacked onto the end of the bscore get added
+    // without any weights.  For example, the "pre" scoer tacks these
+    // on, so that the minimum activation can be hit.
+    for (; i<bs.size(); i++) {
+        res += bs[i];
+    }
+    return res;
+}
+
+void bscore_base::reset_weights()
+{
+    if (_return_weighted_score)
+        _weights = std::vector<double>(_size, 1.0);
+    else
+        _weights = std::vector<double>();
+}
+
 
 ////////////////////////
 // bscore_ctable_base //
 ////////////////////////
 
 bscore_ctable_base::bscore_ctable_base(const CTable& ctable)
-    : _orig_ctable(ctable), _wrk_ctable(ctable),
-      _all_rows_wrk_ctable(ctable),
-      _ctable_usize(ctable.uncompressed_size())
+    : _orig_ctable(ctable), _wrk_ctable(_orig_ctable),
+      _all_rows_wrk_ctable(_wrk_ctable),
+      _ctable_usize(_orig_ctable.uncompressed_size())
 {
-     _size = ctable.size();
+    _size = ctable.size();
+    recompute_weight();
+}
+
+void bscore_ctable_base::recompute_weight() const
+{
+    // Sum of all of the weights in the working table.
+    // Note that these weights can be fractional!
+    _ctable_weight = 0.0;
+    for (const CTable::value_type& vct : _wrk_ctable) {
+        const CTable::counter_t& cnt = vct.second;
+
+        _ctable_weight += cnt.total_count();
+    }
 }
 
 void bscore_ctable_base::ignore_cols(const std::set<arity_t>& idxs) const
@@ -133,6 +189,7 @@ void bscore_ctable_base::ignore_cols(const std::set<arity_t>& idxs) const
 
     // Filter orig_table with permitted idxs.
     _wrk_ctable = _orig_ctable.filtered_preserve_idxs(permitted_idxs);
+    recompute_weight();
 
     // for debugging, keep that around till we fix best_possible_bscore
     // fully_filtered_ctable = _orig_ctable.filtered(permitted_idxs);
@@ -142,17 +199,14 @@ void bscore_ctable_base::ignore_cols(const std::set<arity_t>& idxs) const
 
     if (logger().isFineEnabled()) {
         std::stringstream ss;
-        ss << "wrk_ctable =" << std::endl;
+        ss << "_wrk_ctable =" << std::endl;
         ostreamCTable(ss, _wrk_ctable);
         logger().fine(ss.str());
-
         // for debugging, keep that around till we fix best_possible_bscore
-        // {
-        //     std::stringstream ss;
-        //     ss << "fully_filtered_ctable =" << std::endl;
-        //     ostreamCTable(ss, fully_filtered_ctable);
-        //     logger().fine(ss.str());
-        // }
+        //     std::stringstream ss2;
+        //     ss2 << "fully_filtered_ctable =" << std::endl;
+        //     ostreamCTable(ss2, fully_filtered_ctable);
+        //     logger().fine(ss2.str());
     }
 
     // Copy the working ctable in a temporary ctable that keeps track
@@ -162,19 +216,43 @@ void bscore_ctable_base::ignore_cols(const std::set<arity_t>& idxs) const
 
 void bscore_ctable_base::ignore_rows(const std::set<unsigned>& idxs) const
 {
-    _wrk_ctable = _all_rows_wrk_ctable; // to include all rows in wrk_ctable
+    _wrk_ctable = _all_rows_wrk_ctable; // to include all rows in _wrk_ctable
 
     // if (logger().isFineEnabled())
     //     logger().fine() << "Remove " << idxs.size() << " uncompressed rows from "
-    //                     << "wrk_ctable of compressed size " << wrk_ctable.size()
-    //                     << ", uncompressed size = " << wrk_ctable.uncompressed_size();
+    //                     << "_wrk_ctable of compressed size " << _wrk_ctable.size()
+    //                     << ", uncompressed size = " << _wrk_ctable.uncompressed_size();
     _wrk_ctable.remove_rows(idxs);
     _ctable_usize = _wrk_ctable.uncompressed_size();
     _size = _wrk_ctable.size();
+    recompute_weight();
 
     // if (logger().isFineEnabled())
-    //     logger().fine() << "New wrk_ctable compressed size = " << wrk_ctable.size()
-    //                     << ", uncompressed size = " << ctable_usize;
+    //     logger().fine() << "New _wrk_ctable compressed size = " << _wrk_ctable.size()
+    //                     << ", uncompressed size = " << _ctable_usize;
+}
+
+void bscore_ctable_base::ignore_rows_at_times(const std::set<TTable::value_type>& timestamps) const
+{
+    // logger().fine() << "bscore_ctable_base::ignore_rows_at_times";
+    // ostreamContainer(logger().fine() << "timestamps = ", timestamps);
+
+    _wrk_ctable = _all_rows_wrk_ctable; // to include all rows in _wrk_ctable
+
+    // if (logger().isFineEnabled())
+    //     logger().fine() << "Remove " << timestamps.size() << " dates from "
+    //                     << "_wrk_ctable of compressed size " << _wrk_ctable.size()
+    //                     << ", uncompressed size = " << _wrk_ctable.uncompressed_size();
+
+    _wrk_ctable.remove_rows_at_times(timestamps);
+    _ctable_usize = _wrk_ctable.uncompressed_size();
+    _size = _wrk_ctable.size();
+    recompute_weight();
+
+    // if (logger().isFineEnabled())
+    //     logger().fine() << "New _wrk_ctable compressed size = " << _wrk_ctable.size()
+    //                     << ", uncompressed size = " << _ctable_usize;
+
 }
 
 unsigned bscore_ctable_base::get_ctable_usize() const
@@ -186,7 +264,6 @@ const CTable& bscore_ctable_base::get_ctable() const
 {
     return _orig_ctable;
 }
-
 
 } // ~namespace moses
 } // ~namespace opencog

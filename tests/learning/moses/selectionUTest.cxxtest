@@ -47,19 +47,23 @@ public:
         string data_file_path(test_dir + filename);
 
         // create temp output file
-        vector<string> args = {"-i" + data_file_path, "-Hselect", meval, "--boost=1"};
-        string tempfile = build_arguments(args);
-        moses_exec(args);
+        vector<string> args = {"-i" + data_file_path, "-Hselect", meval,
+                               "-q0.8", "-w0.9",
+                               // "-lDEBUG",
+                               "--boost=1" };
+        auto cmd_tempfile = build_cmd(args);
+        moses_exec(cmd_tempfile.first);
 
         // get the combo tree
-        combo_tree comtr = parse_result(tempfile).second;
-        unlink(tempfile.c_str());
+        combo_tree comtr = parse_result(cmd_tempfile.second).second;
+        unlink(cmd_tempfile.second.c_str());
 
         std::cout << "Learned tree " << comtr << endl;
 
         // Re-read the data file
         Table datatable;
-        datatable = loadTable(data_file_path, "output", std::vector<std::string>());
+        datatable = loadTable(data_file_path, "output", "",
+                              std::vector<std::string>());
 
         OTable predicted(comtr, datatable.itable);
 
@@ -87,22 +91,27 @@ public:
     void test_selection()
     {
         // The expected output is this:
-        // string expstr = "and( 0<( +($output -1615.97)) not(0<( +($output -1878.99))))";
-        string expstr = "and( 0<( +($1 -1615.97)) not(0<( +($1 -1878.99))))";
-        frame("select.csv", "-m500", expstr, 26);
+        string expstr = "and( 0<( +($1 -1329.385)) not(0<( +($1 -1650.225))))";
+        // Maximum reachable score is 28, and should be reachable in
+        // about 7K evaluations.
+        frame("select.csv", "-m15000", expstr, 28);
     }
 
     void test_selection_de()
     {
         // The expected output is this:
-        string expstr = "and( 0<( +($1 -1411.07)) not(0<( +($1 -1708.05))))";
-        frame("select-less-dupe.csv", "-m1000", expstr, 29);
+        string expstr = "and( 0<( +($1 -1329.385)) not(0<( +($1 -1663.795))))";
+        // Maximum reachable score is 12, and should be reachable in 
+        // about 32K evaluations.
+        frame("select-less-dupe.csv", "-m50000", expstr, 12);
     }
 
     void test_selection_no()
     {
         // The expected output is this:
-        string expstr = "and( 0<( +($1 -1329.39)) not(0<( +($1 -1663.79))))";
-        frame("select-less-dupe.csv", "-m1000", expstr, 33);
+        string expstr = "and( 0<( +($1 -1329.385)) not(0<( +($1 -1663.795))))";
+        // Maximum reachable score is 0, and should be reachable in
+        // about 42K evaluations.
+        frame("select-no-dupe.csv", "-m80000", expstr, 0);
     }
 };

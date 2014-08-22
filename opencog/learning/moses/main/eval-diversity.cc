@@ -154,12 +154,7 @@ int main(int argc, char** argv)
         vector<scored_combo_tree> bcts;
         for (const string& file : edp.moses_files) {
             ifstream in(file);
-            in.exceptions(ifstream::failbit | ifstream::badbit | ifstream::eofbit);
-            while (in.good()) {
-                try {
-                    bcts.push_back(istream_scored_combo_tree(in));
-                } catch(...) {}
-            }
+            istream_scored_combo_trees(in, bcts);
         }
 
         // compute the distances between the bscores
@@ -186,9 +181,11 @@ int main(int argc, char** argv)
 
         // compute the distances between the targets
         vector<score_t> dsts;
+#if DOESNT_COMPILE_FOR_ME
         for (unsigned i = 0; i < targets.size(); ++i)
             for (unsigned j = 0; j < i; ++j)
                 dsts.push_back(diversity_params.dst(targets[i], targets[j]));
+#endif
 
         // write the results
         write_results(edp, dsts);        

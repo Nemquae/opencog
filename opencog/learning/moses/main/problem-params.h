@@ -87,11 +87,12 @@ struct problem_params : public option_base
     // output printing options (metapop_printer)
     long result_count;
     bool output_score;
-    bool output_penalty;
+    bool output_cscore;
     bool output_bscore;
     bool output_only_best;
     bool output_eval_number;
     bool output_with_labels;
+    bool output_deme_id;
     bool output_python;
     std::string output_file;
 
@@ -109,7 +110,6 @@ struct problem_params : public option_base
     int revisit;
     bool reduce_all;
     bool linear_regression;
-    bool boosting;
     bool discard_dominated;
     double noise;
     score_t complexity_temperature;
@@ -117,6 +117,11 @@ struct problem_params : public option_base
     double cap_coef;
     unsigned cache_size;
     double perm_ratio;
+    bool boosting;
+    int num_to_promote;
+    bool exact_experts;
+    double expalpha;
+    double bias_scale;
     
     // metapopulation diversity parameters
     score_t diversity_pressure;
@@ -135,6 +140,19 @@ struct problem_params : public option_base
     // contin optimization
     bool weighted_accuracy;
     std::vector<contin_t> discretize_thresholds;
+
+    // Control temporal dispersion pressure, typically between 0 and 1
+    score_t time_dispersion_pressure;
+
+    // Control temporal dispersion pressure, distort the penalty
+    score_t time_dispersion_exponent;
+
+    // Spread bscore across timestamps instead of datapoints
+    bool time_bscore;
+
+    // Control granularity of time bscore (day or month)
+    string time_bscore_granularity_str;
+    TemporalGranularity time_bscore_granularity;
 
     // hc_param  (hill-climbing)
     bool hc_widen_search;
@@ -160,6 +178,25 @@ struct problem_params : public option_base
     // it params
     bool it_abs_err;
 
+    // Subsample deme params
+    unsigned ss_n_subsample_demes,
+        ss_n_top_candidates,
+        ss_n_tuples,
+        ss_n_best_bfdemes;
+    float ss_std_dev_threshold,
+        ss_tanimoto_mean_threshold,
+        ss_tanimoto_geo_mean_threshold,
+        ss_tanimoto_max_threshold,
+        ss_tanimoto_mean_weight,
+        ss_tanimoto_geo_mean_weight,
+        ss_tanimoto_max_weight;
+    bool ss_by_time,
+        ss_contiguous_time;
+
+    // Subsample fitness params
+    unsigned ss_n_subsample_fitnesses;
+    float ss_low_dev_pressure;
+    
     /// Enable feature selection while selecting exemplar
     /// feature selection happens before each representation building
     bool enable_feature_selection;
@@ -167,6 +204,7 @@ struct problem_params : public option_base
     std::string fs_seed;
     feature_selector_parameters festor_params;
     feature_selection_parameters& fs_params;
+    std::string fs_enforce_features_filename;
 
     reduct::rule* bool_reduct;
     reduct::rule* bool_reduct_rep;
@@ -176,6 +214,7 @@ struct problem_params : public option_base
     hc_parameters hc_params;
     moses_parameters moses_params;
     deme_parameters deme_params;
+    subsample_deme_filter_parameters filter_params;
     metapop_parameters meta_params;
     metapop_printer mmr_pa;
 protected:

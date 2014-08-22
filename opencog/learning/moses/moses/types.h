@@ -26,6 +26,7 @@
 #ifndef _MOSES_TYPES_H
 #define _MOSES_TYPES_H
 
+#include <cfloat>
 #include <functional>
 #include <iomanip>
 #include <unordered_set>
@@ -69,6 +70,8 @@ static const int io_score_precision = 18;
 
 static const score_t very_best_score = std::numeric_limits<score_t>::max();
 static const score_t very_worst_score = std::numeric_limits<score_t>::lowest();
+// use FLT_EPSILON not EPSILON because its float, not double.
+static const score_t epsilon_score = FLT_EPSILON;
 
 // But modify the default sort ordering for these objects.
 struct composite_score:
@@ -99,6 +102,13 @@ struct composite_score:
     score_t get_score() const { return score; }
     complexity_t get_complexity() const { return complexity; }
     score_t get_penalized_score() const { return penalized_score; }
+
+    // Use this only to over-ride the score, wehn re-scoring.
+    void set_score(score_t sc)
+    {
+        score = sc;
+        update_penalized_score();
+    }
 
     /// Sign convention: the penalty is positive, it is subtracted from
     /// the "raw" score to get the penalized score.
@@ -135,7 +145,13 @@ struct composite_score:
     // EXPERIMENTAL: if multiply_diversity is set to true then the
     // diversity_penalty is multiplied with the raw score instead
     // being subtracted. This makes more sense if the diversity
-    // penalty represent a probability
+    // penalty represent a probability. Hmm. Except that scores
+    // behave kind-of-like the logarithm of a (solomonoff) probability...
+    // so if if the diversity is acting like a probability, we should
+    // probably be taking it's log, and adding that.  Certainly,
+    // that's exatly how we treat the complexity penalty: its the log
+    // of the total number of states the combo tree represents, which
+    // is why we add it ...
     bool multiply_diversity;
 
 protected:
@@ -175,6 +191,7 @@ struct demeID_t : public std::string
 {
     demeID_t(unsigned expansion = 0 /* default initial deme */);
     demeID_t(unsigned expansion, unsigned breadth_first);
+    demeID_t(unsigned expansion, unsigned breadth_first, unsigned ss_deme);
 };
 
 /// Behavioral scores record one score per row of input data.
@@ -189,7 +206,42 @@ struct demeID_t : public std::string
 /// That is, a behavioral score is always for a particular combot tree,
 /// in reference to a particular table of data.  Exactly which tree it
 /// is, and which table, is implicit.
-typedef std::vector<score_t> behavioral_score;
+//
+// TODO this should be a std::valarray not std::vector but I am too
+// lazy to make the switch right now.
+struct behavioral_score : public std::vector<score_t>
+{
+    behavioral_score() {}
+    behavioral_score(size_t sz) : std::vector<score_t>(sz) {}
+    behavioral_score(size_t sz, score_t val) : std::vector<score_t>(sz, val) {}
+    behavioral_score(std::initializer_list<score_t> il) : std::vector<score_t>(il) {}
+
+    std::vector<score_t> operator-=(const std::vector<score_t>& rhs)
+    {
+        size_t sz = rhs.size();
+        OC_ASSERT(size() == sz,
+            "Error: Incompatible behavioral_score sizes, this=%z rhs=%z",
+            size(), sz);
+        for (size_t i=0; i<sz; i++) {
+            (*this)[i] -= rhs[i];
+        }
+        return *this;
+    }
+};
+
+static inline behavioral_score operator-(const behavioral_score& lhs,
+                                         const behavioral_score& rhs)
+{
+    size_t sz = rhs.size();
+    OC_ASSERT(lhs.size() == sz,
+        "Error: Incompatible behavioral_score sizes, lhs=%z rhs=%z",
+         lhs.size(), sz);
+    behavioral_score bs;
+    for (size_t i=0; i<sz; i++) {
+        bs.push_back(lhs[i] - rhs[i]);
+    }
+    return bs;
+}
 
 /// A single combo tree, together with various score metrics for it.
 ///
@@ -202,8 +254,8 @@ typedef std::vector<score_t> behavioral_score;
 ///    penalties)
 /// -- a behavioral score (how well the tree did on each row of a table;
 ///    exactly which table it is is implicit)
-/// -- a boosing vector (used to implement the boosting algorithm)
-class scored_combo_tree
+/// -- a boosting weight (used to implement the boosting algorithm)
+class scored_combo_tree : public boost::equality_comparable<scored_combo_tree>
 {
 public:
     scored_combo_tree(combo::combo_tree tr,
@@ -221,17 +273,21 @@ private:
     double _weight;
 
 public:
-    const combo::combo_tree& get_tree(void) const { return _tree; }
-    combo::combo_tree& get_tree(void) { return _tree; }
+    const combo::combo_tree& get_tree() const { return _tree; }
+    combo::combo_tree& get_tree() { return _tree; }
 
     const demeID_t get_demeID() const { return _deme_id; }
     demeID_t get_demeID() { return _deme_id; }
 
-    const behavioral_score& get_bscore(void) const
+    const behavioral_score& get_bscore() const
     {
        return _bscore;
     }
-    double get_weight(void) const
+    void set_bscore(const behavioral_score& bs)
+    {
+       _bscore = bs;
+    }
+    double get_weight() const
     {
        return _weight;
     }
@@ -239,18 +295,13 @@ public:
     {
        _weight = w;
     }
-    const composite_score& get_composite_score(void) const
+    const composite_score& get_composite_score() const
     {
        return _cscore;
     }
-    composite_score& get_composite_score(void)
+    composite_score& get_composite_score()
     {
        return _cscore;
-    }
-
-    void set_bscore(behavioral_score& bs)
-    {
-       _bscore = bs;
     }
 
     /* Utility wrappers */
@@ -260,6 +311,8 @@ public:
     score_t get_complexity_penalty() const { return _cscore.get_complexity_penalty(); }
     score_t get_diversity_penalty() const { return _cscore.get_diversity_penalty(); }
     score_t get_penalty() const { return _cscore.get_penalty(); }
+
+    bool operator==(const scored_combo_tree& r) const;
 };
 
 // =======================================================================
@@ -350,9 +403,19 @@ typedef scored_combo_tree_ptr_set::const_iterator scored_combo_tree_ptr_set_cit;
 // ostream functions
 
 std::ostream& ostream_behavioral_score(std::ostream& out, const behavioral_score&);
-std::ostream& ostream_scored_combo_tree(std::ostream& out, const scored_combo_tree&);
 
-scored_combo_tree istream_scored_combo_tree(std::istream& in);
+// Stream out a scored combo tree.
+std::ostream& ostream_scored_combo_tree(std::ostream& out,
+                                        const scored_combo_tree&,
+                                        bool output_score = true,
+                                        bool output_cscore = true,
+                                        bool output_demeID = true,
+                                        bool output_bscore = true);
+
+scored_combo_tree string_to_scored_combo_tree(const std::string& line);
+
+std::istream& istream_scored_combo_trees(std::istream& in,
+                                         std::vector<scored_combo_tree>& scts);
 
 inline std::ostream& operator<<(std::ostream& out,
                                 const moses::scored_combo_tree& sct)

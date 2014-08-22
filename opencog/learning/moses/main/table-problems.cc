@@ -84,6 +84,10 @@ void table_problem_params::add_options(boost::program_options::options_descripti
          "option is useful when not all of the rows in a table are "
          "equally important to model correctly.\n")
 
+        ("timestamp-feature",
+         po::value<string>(&timestamp_feature),
+         "Label of the timestamp feature. If none is given it is ignored.\n")
+
         ("ignore-feature,Y",
          po::value<vector<string>>(&ignore_features_str),
          "Ignore feature from the datasets. Can be used several times "
@@ -108,7 +112,9 @@ void table_problem_base::common_setup(problem_params& pms)
     size_t num_rows = 0;
     for (const string& idf : _tpp.input_data_files) {
         logger().info("Read data file %s", idf.c_str());
-        Table table = loadTable(idf, _tpp.target_feature, _tpp.ignore_features_str);
+        Table table = loadTable(idf, _tpp.target_feature,
+                                _tpp.timestamp_feature,
+                                _tpp.ignore_features_str);
         num_rows += table.size();
 
         // Possibly subsample the table
@@ -179,7 +185,7 @@ void table_problem_base::common_type_setup(problem_params& pms,
         pms.exemplars.push_back(type_to_exemplar(out_type));
     }
 
-    // The exemplar output type can differ from the table output type 
+    // The exemplar output type can differ from the table output type
     // for scorers that are trying to select rows (the pre and select scorers)
     output_type =
         get_type_node(get_output_type_tree(*pms.exemplars.begin()->begin()));
@@ -188,7 +194,7 @@ void table_problem_base::common_type_setup(problem_params& pms,
 
     cand_type_signature = gen_signature(
         get_signature_inputs(table_type_signature),
-        type_tree(output_type)); 
+        type_tree(output_type));
 
     logger().info() << "Inferred output type: " << output_type;
 }
@@ -256,13 +262,12 @@ void ip_problem::run(option_base* ob)
     // same row in the ctable.
     OC_ASSERT(not pms.meta_params.do_boosting,
         "Boosting not supported for the ip problem!");
-    simple_ascore ascore;
-    behave_cscore mbcscore(bscore, ascore, pms.cache_size);
+    behave_cscore mbcscore(bscore, pms.cache_size);
     metapop_moses_results(pms.exemplars, tt,
-                          *pms.bool_reduct, *pms.bool_reduct_rep, 
+                          *pms.bool_reduct, *pms.bool_reduct_rep,
                           mbcscore,
                           pms.opt_params, pms.hc_params,
-                          pms.deme_params, pms.meta_params,
+                          pms.deme_params, pms.filter_params, pms.meta_params,
                           pms.moses_params, pms.mmr_pa);
 
 }
@@ -305,13 +310,12 @@ void ann_table_problem::run(option_base* ob)
     // Boosing for contin values needs a whole bunch of new code.
     OC_ASSERT(not pms.meta_params.do_boosting,
         "Boosting not supported for the ann problem!");
-    simple_ascore ascore;
-    behave_cscore cscore(bscore, ascore, pms.cache_size);
+    behave_cscore cscore(bscore, pms.cache_size);
     metapop_moses_results(pms.exemplars, tt,
                           reduct::ann_reduction(), reduct::ann_reduction(),
                           cscore,
                           pms.opt_params, pms.hc_params,
-                          pms.deme_params, pms.meta_params,
+                          pms.deme_params, pms.filter_params, pms.meta_params,
                           pms.moses_params, pms.mmr_pa);
 }
 
@@ -331,8 +335,12 @@ void ann_table_problem::run(option_base* ob)
     int as = alphabet_size(cand_type_signature, pms.ignore_ops);     \
     SCORER bscore ARGS ;                                             \
     set_noise_or_ratio(bscore, as, pms.noise, pms.complexity_ratio); \
-    boosting_ascore ascore(bscore.size());                           \
-    behave_cscore mbcscore(bscore, ascore, pms.cache_size);          \
+    if (pms.meta_params.do_boosting) bscore.use_weighted_scores();   \
+                                                                     \
+    /* When boosting, cache must not be used, as otherwise, stale */ \
+    /* composite scores get cached and returned.                  */ \
+    if (pms.meta_params.do_boosting) pms.cache_size = 0;             \
+    behave_cscore mbcscore(bscore, pms.cache_size);                  \
     reduct::rule* reduct_cand = pms.bool_reduct;                     \
     reduct::rule* reduct_rep = pms.bool_reduct_rep;                  \
     /* Use the contin reductors for everything else */               \
@@ -343,7 +351,7 @@ void ann_table_problem::run(option_base* ob)
     metapop_moses_results(pms.exemplars, cand_type_signature,        \
                       *reduct_cand, *reduct_rep, mbcscore,           \
                       pms.opt_params, pms.hc_params,                 \
-                      pms.deme_params, pms.meta_params,              \
+                      pms.deme_params, pms.filter_params, pms.meta_params,              \
                       pms.moses_params, pms.mmr_pa);                 \
 }
 
@@ -355,14 +363,27 @@ void pre_table_problem::run(option_base* ob)
     common_setup(pms);
     common_type_setup(pms, id::boolean_type);
 
+    // Enable feature selection while selecting exemplar
+    if (pms.enable_feature_selection && pms.fs_params.target_size > 0) {
+        pms.deme_params.fstor = new feature_selector(ctable,
+                                                     pms.festor_params);
+    }
+
     int as = alphabet_size(cand_type_signature, pms.ignore_ops);
     precision_bscore bscore(ctable,
-                       fabs(pms.hardness),
-                       pms.min_rand_input,
-                       pms.max_rand_input,
-                       pms.hardness >= 0,
-                       pms.pre_worst_norm);
+                            fabs(pms.hardness),
+                            pms.min_rand_input,
+                            pms.max_rand_input,
+                            pms.time_dispersion_pressure,
+                            pms.time_dispersion_exponent,
+                            pms.meta_params.ensemble_params.exact_experts,
+                            pms.meta_params.ensemble_params.bias_scale,
+                            pms.hardness >= 0,
+                            pms.time_bscore,
+                            pms.time_bscore_granularity);
     set_noise_or_ratio(bscore, as, pms.noise, pms.complexity_ratio);
+    if (pms.meta_params.do_boosting) bscore.use_weighted_scores();
+
     if (pms.gen_best_tree) {
         // experimental: use some canonically generated
         // candidate as exemplar seed
@@ -371,26 +392,19 @@ void pre_table_problem::run(option_base* ob)
         pms.exemplars.push_back(tr);
     }
 
-    // Enable feature selection while selecting exemplar
-    if (pms.enable_feature_selection && pms.fs_params.target_size > 0) {
-        pms.deme_params.fstor = new feature_selector(ctable,
-                                                     pms.festor_params);
-    }
- 
-    // In order to support boosting, the precision_bscore
-    // would need to be reworked to always return a predictable,
-    // dixed number of rows.
-    OC_ASSERT(not pms.meta_params.do_boosting,
-        "Boosting not supported for the pre problem!");
-    simple_ascore ascore;
-    behave_cscore mbcscore(bscore, ascore, pms.cache_size);
+    // We support boosting by generating an "ensemble of experts" model.
+    pms.meta_params.ensemble_params.experts = true;
+    // When boosting, cache must not be used, as otherwise, stale
+    // composite scores get cached and returned.
+    if (pms.meta_params.do_boosting) pms.cache_size = 0;
+
+    behave_cscore mbcscore(bscore, pms.cache_size);
     metapop_moses_results(pms.exemplars, cand_type_signature,
                           *pms.bool_reduct, *pms.bool_reduct_rep,
                           mbcscore,
                           pms.opt_params, pms.hc_params,
-                          pms.deme_params, pms.meta_params,
+                          pms.deme_params, pms.filter_params, pms.meta_params,
                           pms.moses_params, pms.mmr_pa);
-
 }
 
 void pre_conj_table_problem::run(option_base* ob)
@@ -404,8 +418,7 @@ void pre_conj_table_problem::run(option_base* ob)
     // indexed number of rows.
     OC_ASSERT(not pms.meta_params.do_boosting,
         "Boosting not supported for the pre problem!");
-
-    REGRESSION(ctable, precision_conj_bscore, 
+    REGRESSION(ctable, precision_conj_bscore,
                (ctable, fabs(pms.hardness), pms.hardness >= 0));
 }
 
@@ -484,7 +497,7 @@ void it_table_problem::run(option_base* ob)
             partial_solver well(ctable,
                                 pms.exemplars, *pms.contin_reduct,
                                 pms.opt_params, pms.hc_params,
-                                pms.deme_params,
+                                pms.deme_params, pms.filter_params,
                                 pms.meta_params,
                                 pms.moses_params, pms.mmr_pa);
             well.solve();
@@ -528,7 +541,11 @@ void select_table_problem::run(option_base* ob)
     common_setup(pms);
     common_type_setup(pms, id::boolean_type);
 
-    REGRESSION(ctable, select_bscore, (ctable));
+    REGRESSION(ctable, select_bscore,
+               (ctable, pms.min_rand_input,
+                        pms.max_rand_input,
+                        fabs(pms.hardness),
+                        pms.hardness >= 0.0));
 }
 
 void cluster_table_problem::run(option_base* ob)
@@ -552,7 +569,7 @@ void register_table_problems(problem_manager& pmr, option_manager& mgr)
 
 	pmr.register_problem(new ip_problem(*tpp, *ippp));
 	pmr.register_problem(new ann_table_problem(*tpp));
-	pmr.register_problem(new pre_table_problem(*tpp));
+    pmr.register_problem(new pre_table_problem(*tpp));
 	pmr.register_problem(new pre_conj_table_problem(*tpp));
 	pmr.register_problem(new prerec_table_problem(*tpp));
 	pmr.register_problem(new recall_table_problem(*tpp));

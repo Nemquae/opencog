@@ -17,6 +17,7 @@ __VERBOSE__ = False
 # Set to False to search for needed .scm files based on environment variables PROJECT_SOURCE_DIR and PROJECT_BINARY_DIR
 __DEV_MODE__ = False
 
+
 class PLNUnitTester(TestCase):
     def setUp(self):
         self.atomSpaceFileData = AtomSpace()
@@ -27,6 +28,7 @@ class PLNUnitTester(TestCase):
         self.chainer = None
 
         # Works:
+        self.addTestFile("SubsetAS_new.scm")
         self.addTestFile("AndRule_new.scm")
         self.addTestFile("BooleanTransformationRule_new.scm")
         self.addTestFile("DeductionRule_InheritanceLink.scm")
@@ -38,6 +40,9 @@ class PLNUnitTester(TestCase):
         self.addTestFile("OrRule_new.scm")
         self.addTestFile("NotCreationRule.scm")
         self.addTestFile("TransitiveSimilarityRule_SimilarityLink.scm")
+        self.addTestFile("AndAs1stArgInsideLinkRule_InheritanceLink.scm")
+        self.addTestFile("AndAs2ndArgInsideLinkRule_InheritanceLink.scm")
+        self.addTestFile("SatisfyingSetToConceptRule.scm")
         # context rules
         self.addTestFile("InheritanceToContextRule.scm")
         self.addTestFile("ContextToInheritanceRule.scm")
@@ -45,7 +50,6 @@ class PLNUnitTester(TestCase):
         self.addTestFile("ContextToSubsetRule.scm")
         self.addTestFile("EvaluationToContextRule.scm")
         self.addTestFile("SubsetToContextRule.scm")
-
 
         # Testing (just a placeholder for where to put tests while...testing them)
         #self.addTestFile("SimilarityRule_And.scm")
@@ -65,13 +69,8 @@ class PLNUnitTester(TestCase):
         #self.addTestFile("AndBulkEvaluationRulePredicates_new.scm")
         #self.addTestFile("NegatedAndBulkEvaluationRule3EvaluationLinks_new.scm")
 
-        # Doesn't work, not sure yet why.
-        #self.addTestFile("SubsetAS_new.scm")
-
         # Doesn't work, as the unit test setup doesn't allow for changing TV's (YET)
         # self.addTestFile("AndBreakdownRule.scm")
-
-
 
     def tearDown(self):
         del self.atomSpaceFileData
@@ -392,6 +391,8 @@ class AllRules(object):
             self.chainer.add_rule(TermProbabilityRule(self.chainer, link_type))
             self.chainer.add_rule(ModusPonensRule(self.chainer, link_type))
             self.chainer.add_rule(PreciseModusPonensRule(self.chainer, link_type))
+            self.chainer.add_rule(AndAs1stArgInsideLinkRule(self.chainer, link_type))
+            self.chainer.add_rule(AndAs2ndArgInsideLinkRule(self.chainer, link_type))
 
         for link_type in similarity_types:
             # SimilarityLinks don't require an InversionRule obviously
@@ -442,6 +443,7 @@ class AllRules(object):
             IntensionalInheritanceEvaluationRule(self.chainer))
         self.chainer.add_rule(
             IntensionalSimilarityEvaluationRule(self.chainer))
+        self.chainer.add_rule(SatisfyingSetToConceptRule(self.chainer, 1))
 
         # context rules
         self.chainer.add_rule(InheritanceToContextRule(self.chainer))

@@ -26,10 +26,13 @@
 #define _PRECISION_BSCORE_H
 
 #include "scoring_base.h"
+#include "time_dispersion.h"
 
 namespace opencog { namespace moses {
 
 using combo::CTable;
+using combo::count_t;
+using combo::multi_type_seq;
 using combo::type_node;
 
 /**
@@ -72,12 +75,6 @@ using combo::type_node;
  * description of discriminating_bscore::get_threshold_penalty() for
  * details.
  *
- * If worst_norm is true, then the percision is divided by the absolute
- * average of the negative lower (resp. positive upper if
- * this->positive is false) decile or less. If there is no negative
- * (resp. positive if this->positive is false) values then it is not
- * normalized. (??)
- *
  * If substract_neg_target is true then the negation of the target (in
  * the boolean case) count for -1/2 instead of 0 and 1/2 instead of
  * 1. In other words the fitness to maximize is:
@@ -105,19 +102,25 @@ using combo::type_node;
  * XXX This class should be reworked to derive from
  * discriminating_bscore.  This would allow us to get rid of duplicate
  * code for sec_complexity_coef() and for get_activation_penalty() and
- * min_improv() and sum_outputs(). TODO In fact everything could be
- * replaced, if it were not for the worst_deciles stuff.
+ * min_improv() and sum_outputs().
  */
-struct precision_bscore : public bscore_ctable_base
+struct precision_bscore : public bscore_ctable_time_dispersion
 {
     precision_bscore(const CTable& _ctable,
-                     float penalty = 1.0f,
+                     float activation_pressure = 1.0f,
                      float min_activation = 0.5f,
                      float max_activation = 1.0f,
+                     float dispersion_pressure = 0.0f,
+                     float dispersion_exponent = 1.0f,
+                     bool exact_experts = true,
+                     double bias_scale = 1.0,
                      bool positive = true,
-                     bool worst_norm = false);
+                     bool time_bscore = false,
+                     TemporalGranularity granularity = TemporalGranularity::day);
 
     behavioral_score operator()(const combo_tree& tr) const;
+    behavioral_score operator()(const scored_combo_tree_set&) const;
+    score_t get_error(const behavioral_score&) const;
 
     // Return the best possible bscore. Used as one of the
     // termination conditions (when the best bscore is reached).
@@ -154,26 +157,29 @@ struct precision_bscore : public bscore_ctable_base
 
 protected:
     score_t min_activation, max_activation;
-    score_t max_output; // max output one gets (1 in case it is
-                        // boolean). This is used to normalized the
-                        // precision in case the output isn't boolean.
-    score_t penalty;
-    bool positive, worst_norm;
+    score_t activation_pressure;
+    double bias_scale;
+    bool exact_experts;
 
-    // if enabled then each datapoint is an entry in the bscore (its
-    // part contributing to the precision, and the activation penalty
-    // is the last one).
-    // WARNING: worst_score isn't supported then
-    bool precision_full_bscore;
+    bool positive;
 
+    bool time_bscore;           // whether the bscore is spread over
+                                // the temporal axis
     type_node output_type;
 
+    // the actual work-horse.
+    behavioral_score do_score(std::function<bool(const multi_type_seq&)>) const;
+
 private:
+    vertex _target, _neg_target; // same as positive
     score_t get_activation_penalty(score_t activation) const;
 
     // function to calculate the total weight of the observations
     // associated to an input vector
-    std::function<score_t(const CTable::counter_t&)> sum_outputs;
+    score_t sum_outputs(const CTable::counter_t&) const;
+
+    behavioral_score exact_selection(const scored_combo_tree_set&) const;
+    behavioral_score bias_selection(const scored_combo_tree_set&) const;
 };
 
 /**
@@ -200,6 +206,7 @@ protected:
     const CTable& ctable;
 
     size_t ctable_usize;   // uncompressed size of ctable
+
     float hardness;
     bool positive;
 

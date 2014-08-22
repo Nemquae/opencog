@@ -67,7 +67,7 @@ using namespace boost::accumulators;
 behavioral_score logical_bscore::operator()(const combo_tree& tr) const
 {
     combo::complete_truth_table tt(tr, _arity);
-    behavioral_score bs(_target.size());
+    behavioral_score bs(_size);
 
     // Compare the predictions of the tree to that of the desired
     // result. A correct prdiction gets a score of 0, an incorrect
@@ -79,20 +79,18 @@ behavioral_score logical_bscore::operator()(const combo_tree& tr) const
 }
 
 /// Boolean ensemble scorer.  Assumes that the ensemble signature outputs
-/// a boolean value.  All of the trees in the ensmble get a wieghted vote,
+/// a boolean value.  All of the trees in the ensmble get a weighted vote,
 /// that vote is totalled to get the prediction of the ensemble, and then
 /// compared to the desired output.
 behavioral_score logical_bscore::operator()(const scored_combo_tree_set& ensemble) const
 {
-    size_t sz = _target.size();
-
     // Step 1: accumulate the weighted prediction of each tree in
     // the ensemble.
-    behavioral_score hypoth(sz);
+    behavioral_score hypoth(_size, 0.0);
     for (const scored_combo_tree& sct: ensemble) {
         combo::complete_truth_table tt(sct.get_tree(), _arity);
         score_t weight = sct.get_weight();
-        for (size_t i=0; i<sz; i++) {
+        for (size_t i=0; i<_size; i++) {
             // Add +1 if prediction is true and -1 if prediction is false.
             // We could gain some minor performance improvement if we
             // moved this out of the loop, but who cares, this scorer is
@@ -103,9 +101,9 @@ behavioral_score logical_bscore::operator()(const scored_combo_tree_set& ensembl
 
     // Step 2: compare the prediction of the ensemble to the desired
     // result. The array "hypoth" is positive to predict true, and
-    // negative to predict false.  The resulting score is 0 if corrrect,
+    // negative to predict false.  The resulting score is 0 if correct,
     // and -1 if incorrect.
-    behavioral_score bs(sz);
+    behavioral_score bs(_size);
     boost::transform(hypoth, _target, bs.begin(),
         [](score_t hyp, bool b2) {
             bool b1 = (hyp > 0.0) ? true : false;
@@ -116,12 +114,23 @@ behavioral_score logical_bscore::operator()(const scored_combo_tree_set& ensembl
 
 behavioral_score logical_bscore::best_possible_bscore() const
 {
-    return behavioral_score(_target.size(), 0);
+    return behavioral_score(_size, 0);
+}
+
+behavioral_score logical_bscore::worst_possible_bscore() const
+{
+    return behavioral_score(_size, -1);
 }
 
 score_t logical_bscore::min_improv() const
 {
     return 0.5;
+}
+
+score_t logical_bscore::get_error(const behavioral_score& bs) const
+{
+    // Its minus the score: 0.0 is perfect score, 1.0 is worst score.
+    return - sum_bscore(bs) / ((score_t) _size);
 }
 
 ///////////////////
@@ -277,33 +286,131 @@ behavioral_score ctruth_table_bscore::operator()(const combo_tree& tr) const
         bs.push_back(-sc);
     }
 
+    // Report the score only relative to the best-possible score.
+    bs -= _best_possible_score;
+
     log_candidate_bscore(tr, bs);
 
     return bs;
 }
 
-behavioral_score ctruth_table_bscore::best_possible_bscore() const
+/// Boolean ensemble scorer.  Assumes that the ensemble signature outputs
+/// a boolean value.  All of the trees in the ensmble get a weighted vote,
+/// that vote is totalled to get the prediction of the ensemble, and then
+/// compared to the desired output.
+behavioral_score ctruth_table_bscore::operator()(const scored_combo_tree_set& ensemble) const
 {
-    behavioral_score bs;
-    transform(_ctable | map_values, back_inserter(bs),
+    size_t sz = _ctable.size();
+
+    // Step 1: accumulate the weighted prediction of each tree in
+    // the ensemble.
+    behavioral_score hypoth(sz, 0.0);
+    for (const scored_combo_tree& sct: ensemble) {
+        // apply each tree, in turn.
+        interpreter_visitor iv(sct.get_tree());
+        auto interpret_tr = boost::apply_visitor(iv);
+        score_t weight = sct.get_weight();
+
+        // Evaluate the tree for all rows of the ctable
+        size_t i=0;
+        for (const CTable::value_type& vct : _ctable) {
+            // Add +1 if prediction is up and -1 if prediction is down.
+            vertex prediction(interpret_tr(vct.first.get_variant()));
+            hypoth[i] += (id::logical_true == prediction)? weight : -weight;
+            i++;
+        }
+    }
+
+    // Step 2: compare the prediction of the ensemble to the desired
+    // result. The array "hypoth" is positive to predict up, and
+    // negative to predict down.  The compressed table holds the 
+    // (possibly weighted) count of up and down values; in the limit
+    // of an uncompressed table, the number of 'wrong' answers is
+    // the count of the iverted prediction.
+    behavioral_score bs(sz);
+    size_t i =0;
+    for (const CTable::value_type& vct : _ctable) {
+        const CTable::counter_t& cnt = vct.second;
+        vertex inverted_prediction = (hypoth[i] > 0.0) ? 
+            id::logical_false : id::logical_true;
+        bs[i] = -cnt.get(inverted_prediction);
+        i++;
+    }
+
+    // Report the score only relative to the best-possible score.
+    bs -= _best_possible_score;
+    return bs;
+}
+
+void ctruth_table_bscore::set_best_possible_bscore()
+{
+    transform(_ctable | map_values,
+              back_inserter(_best_possible_score),
               [](const CTable::counter_t& c) {
                   // OK, this looks like magic, but here's what it does:
-                  // CTable is a compressed table; multiple rows may
+                  // CTable is a compressed table; different rows may
                   // have identical inputs, differing only in output.
                   // Clearly, in such a case, both outputs cannot be
                   // simultanously satisfied, but we can try to satisfy
-                  // the one of which there is more.  Thus, we take
-                  // the min of the two possiblities.
-                  return -score_t(min(c.get(id::logical_true),
-                                      c.get(id::logical_false)));
+                  // the one of which there is more (the max).  Thus,
+                  // we take the fmin of the two possiblities as the
+                  // number of wrong answers we are doomed to get.
+                  //
+                  // fmin is used, because the rows may be weighted
+                  // by fractional values. This gives the correct
+                  // result for weighted datasets: the most heavily
+                  // weighted outcome is the prefered one.
+                  return -score_t(fmin(c.get(id::logical_true),
+                                       c.get(id::logical_false)));
               });
 
+    logger().info() << "ctruth_table_bscore: Best possible: "
+                    << _best_possible_score;
+}
+
+behavioral_score ctruth_table_bscore::best_possible_bscore() const
+{
+    // The returned best score will always be zero, because the actual
+    // best score is subtracted; this is required to get boosting to
+    // work.
+    return behavioral_score(_size, 0.0);
+}
+
+behavioral_score ctruth_table_bscore::worst_possible_bscore() const
+{
+    behavioral_score bs;
+    for (const CTable::value_type& vct : _ctable) {
+        const CTable::counter_t& cnt = vct.second;
+
+        // The most that the score can improve is to flip true to false,
+        // or v.v. The worst score is to get the majority wrong.  This
+        // workes correctly even for weighted tables, where the counts
+        // could be arbitrary float-point values.
+        score_t w = fabs (cnt.get(id::logical_true) -
+                          cnt.get(id::logical_false));
+        bs.push_back(-w);
+    }
     return bs;
 }
 
 score_t ctruth_table_bscore::min_improv() const
 {
-    return 0.5;
+    // A return value of 0.5 would be correct only if all rows had
+    // a weight of exactly 1.0.  Otherwise, we look for the row with
+    // the smallest (positive) weight, and return that.
+    // return 0.5;
+
+    score_t min_weight = FLT_MAX;
+    for (const CTable::value_type& vct : _ctable) {
+        const CTable::counter_t& cnt = vct.second;
+
+        // The most that the score can improve is to flip
+        // true to false, or v.v.
+        score_t w = fabs (cnt.get(id::logical_true) -
+                          cnt.get(id::logical_false));
+        if (w != 0.0 and w < min_weight) min_weight = w;
+    }
+    return 0.5 * min_weight;
 }
 
 
@@ -350,13 +457,6 @@ behavioral_score enum_table_bscore::best_possible_bscore() const
               });
 
     return bs;
-}
-
-behavioral_score enum_table_bscore::worst_possible_bscore() const
-{
-    // Make an attempt too at least return the correct length
-    double bad = very_worst_score / ((double) _ctable.size() + 1);
-    return behavioral_score(_ctable.size(), bad);
 }
 
 score_t enum_table_bscore::min_improv() const
@@ -634,8 +734,8 @@ interesting_predicate_bscore::interesting_predicate_bscore(const CTable& ctable_
     // That is, create a historgram showing how often each output value
     // occurs in the ctable.
     boost::for_each(_ctable | map_values, [this](const CTable::mapped_type& mv) {
-            boost::for_each(mv, [this](const CTable::mapped_type::value_type& v) {
-                    _counter[get_contin(v.first)] += v.second; }); });
+            boost::for_each(mv, [this](const CTable::counter_t::value_type& v) {
+                    _counter[get_contin(v.first.value)] += v.second; }); });
 
     // Precompute pdf (probability distribution function)
     if (_kld_w > 0) {
@@ -647,7 +747,7 @@ interesting_predicate_bscore::interesting_predicate_bscore(const CTable& ctable_
         for (const auto& v : _pdf)
             acc(v.first, weight = v.second);
         _skewness = weighted_skewness(acc);
-        logger().fine("interesting_predicate_bscore::_skewness = %f", _skewness);
+        logger().debug("interesting_predicate_bscore::_skewness = %f", _skewness);
     }
 }
 
@@ -676,8 +776,8 @@ behavioral_score interesting_predicate_bscore::operator()(const combo_tree& tr) 
                         total += tc;
                     });
 
-    logger().fine("total = %u", total);
-    logger().fine("actives = %u", actives);
+    logger().fine("ip scorer: total = %u", total);
+    logger().fine("ip scorer: actives = %u", actives);
 
     // Create a histogram of output values, ignoring non-selected rows.
     // Do this by filtering the ctable output column according to the,
@@ -688,11 +788,11 @@ behavioral_score interesting_predicate_bscore::operator()(const combo_tree& tr) 
                     [&](const CTable::counter_t& c, const vertex& v) {
                         if (v == target) {
                             for (const auto& mv : c)
-                                pred_counter[get_contin(mv.first)] = mv.second;
+                                pred_counter[get_contin(mv.first.value)] = mv.second;
                         }});
 
-    logger().fine("pred_cache.size() = %u", pred_cache.size());
-    logger().fine("pred_counter.size() = %u", pred_counter.size());
+    logger().fine("ip scorer: pred_cache.size() = %u", pred_cache.size());
+    logger().fine("ip scorer: pred_counter.size() = %u", pred_counter.size());
 
     // If there's only one output value left, then punt.  Statistics
     // like skewness need a distribution that isn't a single spike.
@@ -712,7 +812,7 @@ behavioral_score interesting_predicate_bscore::operator()(const combo_tree& tr) 
             boost::transform(bs, bs.begin(), _kld_w * arg1);
         } else {
             score_t pred_klds = _klds(pred_counter);
-            logger().fine("klds = %f", pred_klds);
+            logger().fine("ip scorer: klds = %f", pred_klds);
             bs.push_back(_kld_w * pred_klds);
         }
     }
@@ -734,7 +834,7 @@ behavioral_score interesting_predicate_bscore::operator()(const combo_tree& tr) 
             score_t val_skewness = (_abs_skewness?
                                     abs(diff_skewness):
                                     diff_skewness);
-            logger().fine("pred_skewness = %f", pred_skewness);
+            logger().fine("ip scorer: pred_skewness = %f", pred_skewness);
             if (_skewness_w > 0)
                 bs.push_back(_skewness_w * val_skewness);
         }
@@ -744,7 +844,7 @@ behavioral_score interesting_predicate_bscore::operator()(const combo_tree& tr) 
 
             // Compute the standardized Mann–Whitney U
             stdU = standardizedMannWhitneyU(_counter, pred_counter);
-            logger().fine("stdU = %f", stdU);
+            logger().fine("ip scorer: stdU = %f", stdU);
             if (_stdU_w > 0.0)
                 bs.push_back(_stdU_w * abs(stdU));
         }
@@ -760,8 +860,8 @@ behavioral_score interesting_predicate_bscore::operator()(const combo_tree& tr) 
     // add activation_penalty component
     score_t activation = actives / (score_t) total;
     score_t activation_penalty = get_activation_penalty(activation);
-    logger().fine("activation = %f", activation);
-    logger().fine("activation penalty = %e", activation_penalty);
+    logger().fine("ip scorer: activation = %f", activation);
+    logger().fine("ip scorer: activation penalty = %e", activation_penalty);
     bs.push_back(activation_penalty);
 
     log_candidate_bscore(tr, bs);
@@ -787,12 +887,12 @@ void interesting_predicate_bscore::set_complexity_coef(unsigned alphabet_size,
 
 score_t interesting_predicate_bscore::get_activation_penalty(score_t activation) const
 {
-    score_t dst = max(max(_min_activation - activation, score_t(0))
+    score_t dst = fmax(fmax(_min_activation - activation, score_t(0))
                       / _min_activation,
-                      max(activation - _max_activation, score_t(0))
-                      / (1 - _max_activation));
-    logger().fine("dst = %f", dst);
-    return log(pow((1 - dst), _penalty));
+                      fmax(activation - _max_activation, score_t(0))
+                      / (1.0 - _max_activation));
+    logger().fine("ip scorer: dst = %f", dst);
+    return log(pow((1.0 - dst), _penalty));
 }
 
 score_t interesting_predicate_bscore::min_improv() const
@@ -963,7 +1063,7 @@ behavioral_score cluster_bscore::operator()(const combo_tree& tr) const
 // termination conditions (when the best bscore is reached).
 behavioral_score cluster_bscore::best_possible_bscore() const
 {
-    return behavioral_score(1, 1.0e37);
+    return behavioral_score(1, very_best_score);
 }
 
 score_t cluster_bscore::min_improv() const

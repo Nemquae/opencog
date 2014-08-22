@@ -47,6 +47,7 @@ class partial_solver
                        const optim_parameters& opt_params,
                        const hc_parameters& hc_params,
                        const deme_parameters& deme_params,
+                       const subsample_deme_filter_parameters&,
                        const metapop_parameters& meta_params,
                        const moses_parameters& moses_params,
                        const metapop_printer& mmr_pa);
@@ -117,11 +118,11 @@ class partial_solver
         optim_parameters _opt_params;
         hc_parameters _hc_params;
         deme_parameters _deme_params;
+        subsample_deme_filter_parameters _filter_params;
         metapop_parameters _meta_params;
         moses_parameters _moses_params;
         const metapop_printer& _printer;
 
-        ascore_base *_ascore;
         // typedef enum_filter_bscore BScore;
         // typedef enum_graded_bscore BScore;
         typedef enum_effective_bscore BScore;

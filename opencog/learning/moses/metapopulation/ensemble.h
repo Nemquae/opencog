@@ -24,9 +24,10 @@
 #ifndef _OPENCOG_ENSEMBLE_H
 #define _OPENCOG_ENSEMBLE_H
 
+#include "ensemble_params.h"
 #include "../moses/types.h"  // for scored_combo_tree
 #include "../scoring/behave_cscore.h"
-#include "../scoring/boosting_ascore.h"
+#include "../scoring/scoring_base.h"
 
 namespace opencog {
 namespace moses {
@@ -41,7 +42,7 @@ namespace moses {
  * also holds a collection of combo trees. However, the metapopulation
  * is meant to do something different: to provide the 'breeding stock'
  * for deme expansion and optimization.  Therefore, the metapopulation
- * management policy is different from the ensemble, although it is 
+ * management policy is different from the ensemble, although it is
  * likely that the two will hold similar contents. The ensemble is
  * intended for inference; the metapopulation for breeding.
  *
@@ -56,25 +57,11 @@ namespace moses {
  * Someday, it should have an independent existance.
  */
 
-struct ensemble_parameters
-{
-	ensemble_parameters() :
-		num_to_promote(1)
-	{}
-
-	int num_to_promote;  // max number of demes to accept into ensemble,
-	                     // per learning iteration.
-
-};
-
 class ensemble
 {
 public:
     ensemble(behave_cscore&,
              const ensemble_parameters& ep = ensemble_parameters());
-
-    // Should this be the right interface ?? Similar to metapop ...
-    // void add_deme(deme_t&, const representation&);
 
     void add_candidates(scored_combo_tree_set&);
 
@@ -82,14 +69,27 @@ public:
         return _scored_trees;
     }
 
-    combo::combo_tree get_weighted_tree() const;
+    const combo::combo_tree& get_weighted_tree() const;
+
+    score_t flat_score() const;
 
 private:
     const ensemble_parameters& _params;
-    boosting_ascore* _booster;
-    double _best_possible_score;
+    bscore_base& _bscorer;
+    double _effective_length;
+    double _tolerance;
+    double _bias;
+    std::vector<double> _row_bias;
 
     scored_combo_tree_set _scored_trees;
+    mutable combo_tree _weighted_tree;
+
+    void add_adaboost(scored_combo_tree_set&);
+    void add_expert(scored_combo_tree_set&);
+
+    const combo::combo_tree& get_adaboost_tree() const;
+    const combo::combo_tree& get_exact_tree() const;
+    const combo::combo_tree& get_expert_tree() const;
 };
 
 }}; // namespace opencog::moses

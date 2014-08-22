@@ -45,6 +45,7 @@ using combo::count_t;
  * then the rows are ranked in reverse order.
  *
  * The 'hardness' indicates just how sharp it selection will be TBD.
+ * Not yet implemented.
  */
 struct select_bscore : public bscore_ctable_base
 {
@@ -56,15 +57,18 @@ struct select_bscore : public bscore_ctable_base
 
     behavioral_score operator()(const combo_tree& tr) const;
     behavioral_score operator()(const scored_combo_tree_set&) const;
+    score_t get_error(const behavioral_score&) const;
 
     // Return the best possible bscore. Used as one of the
     // termination conditions (when the best bscore is reached).
     behavioral_score best_possible_bscore() const;
+    behavioral_score worst_possible_bscore() const;
 
     score_t min_improv() const;
 
 protected:
-    std::pair<double, double> get_weightiest(const Counter<vertex, count_t>&) const;
+    void set_best_possible_bscore();
+    behavioral_score _best_possible_score;
 
     bool _positive;
     score_t _lower_bound;
