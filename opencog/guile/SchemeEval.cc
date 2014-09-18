@@ -9,6 +9,9 @@
 
 #ifdef HAVE_GUILE
 
+#include <unistd.h>
+#include <fcntl.h>
+
 #include <libguile.h>
 #include <libguile/backtrace.h>
 #include <libguile/debug.h>
@@ -36,15 +39,25 @@ void SchemeEval::init(void)
 	PrimitiveEnviron::init();
 
 	// Output ports for side-effects.
-	saved_outport = scm_current_output_port();
-	saved_outport = scm_gc_protect_object(saved_outport);
+	_saved_outport = scm_current_output_port();
+	_saved_outport = scm_gc_protect_object(_saved_outport);
 
-	outport = scm_open_output_string();
-	outport = scm_gc_protect_object(outport);
+	SCM pair = scm_pipe();
+	_pipe = scm_car(pair);
+	_pipe = scm_gc_protect_object(_pipe);
+	_pipeno = scm_to_int(scm_fileno(_pipe));
+	_outport = scm_cdr(pair);
+	_outport = scm_gc_protect_object(_outport);
+	scm_setvbuf(_outport, scm_from_int (_IONBF), SCM_UNDEFINED);
 
-	scm_set_current_output_port(outport);
+	// We want non-blocking reads.
+	int flags = fcntl(_pipeno, F_GETFL, 0);
+	if (flags < 0) flags = 0;
+	fcntl(_pipeno, F_SETFL, flags | O_NONBLOCK);
 
-	in_shell = false;
+	scm_set_current_output_port(_outport);
+
+	_in_shell = false;
 
 	// User error and crash management
 	error_string = SCM_EOL;
@@ -54,6 +67,15 @@ void SchemeEval::init(void)
 	captured_stack = scm_gc_protect_object(captured_stack);
 
 	pexpr = NULL;
+	_eval_done = false;
+	_poll_done = false;
+}
+
+/// Discard all chars in the outport.
+void SchemeEval::drain_output(void)
+{
+	// read and discard.
+	poll_port();
 }
 
 void * SchemeEval::c_wrap_init(void *p)
@@ -66,12 +88,15 @@ void * SchemeEval::c_wrap_init(void *p)
 void SchemeEval::finish(void)
 {
 	// Restore the previous outport (if its still alive)
-	if (scm_is_false(scm_port_closed_p(saved_outport)))
-		scm_set_current_output_port(saved_outport);
-	scm_gc_unprotect_object(saved_outport);
+	if (scm_is_false(scm_port_closed_p(_saved_outport)))
+		scm_set_current_output_port(_saved_outport);
+	scm_gc_unprotect_object(_saved_outport);
 
-	scm_close_port(outport);
-	scm_gc_unprotect_object(outport);
+	scm_close_port(_outport);
+	scm_gc_unprotect_object(_outport);
+
+	scm_close_port(_pipe);
+	scm_gc_unprotect_object(_pipe);
 
 	scm_gc_unprotect_object(error_string);
 	scm_gc_unprotect_object(captured_stack);
@@ -85,7 +110,7 @@ void * SchemeEval::c_wrap_finish(void *p)
 }
 
 // The following two routines are needed to avoid bad garbage collection
-// of anything we've kept in the object.  
+// of anything we've kept in the object.
 void SchemeEval::set_captured_stack(SCM newstack)
 {
 	// protect before unprotecting, to avoid multi-threaded races.
@@ -140,7 +165,7 @@ static void * do_bogus_scm(void *p)
  * guile-2.0.5 and gc-7.1 from Ubuntu Precise.
  *
  * Its claimed that the bug only happens for top-level defines.
- * Thus, in principle, theading should be OK after all scripts have
+ * Thus, in principle, threading should be OK after all scripts have
  * been loaded.
  */
 static pthread_mutex_t serialize_lock;
@@ -221,7 +246,7 @@ void SchemeEval::per_thread_init(void)
 
 	// Guile implements the current port as a fluid on each thread.
 	// So, for every new thread, we need to set this.
-	scm_set_current_output_port(outport);
+	scm_set_current_output_port(_outport);
 }
 
 SchemeEval::~SchemeEval()
@@ -382,7 +407,7 @@ SCM SchemeEval::catch_handler (SCM tag, SCM throw_args)
  * An "unforgiving" evaluator, with none of these amenities, can be
  * found in eval_h(), below.
  */
-std::string SchemeEval::eval(const std::string &expr)
+void SchemeEval::eval_expr(const std::string &expr)
 {
 	pexpr = &expr;
 
@@ -390,20 +415,31 @@ std::string SchemeEval::eval(const std::string &expr)
 	thread_lock();
 #endif /* WORK_AROUND_GUILE_THREADING_BUG */
 
-	in_shell = true;
+	_in_shell = true;
 	scm_with_guile(c_wrap_eval, this);
-	in_shell = false;
+	_in_shell = false;
 
 #ifdef WORK_AROUND_GUILE_THREADING_BUG
 	thread_unlock();
 #endif /* WORK_AROUND_GUILE_THREADING_BUG */
+}
 
+void* SchemeEval::c_wrap_poll(void* p)
+{
+	SchemeEval* self = (SchemeEval*) p;
+	self->answer = self->do_poll_result();
+	return p;
+}
+
+std::string SchemeEval::poll_result()
+{
+	scm_with_guile(c_wrap_poll, this);
 	return answer;
 }
 
-void * SchemeEval::c_wrap_eval(void * p)
+void* SchemeEval::c_wrap_eval(void* p)
 {
-	SchemeEval *self = (SchemeEval *) p;
+	SchemeEval* self = (SchemeEval*) p;
 
 	// Normally, neither of these are ever null.
 	// But sometimes, a heavily loaded server can crash here.
@@ -411,7 +447,7 @@ void * SchemeEval::c_wrap_eval(void * p)
 	OC_ASSERT(self, "c_wrap_eval got null pointer!");
 	OC_ASSERT(self->pexpr, "c_wrap_eval got null expression!");
 
-	self->answer = self->do_eval(*(self->pexpr));
+	self->do_eval(*(self->pexpr));
 	return self;
 }
 
@@ -422,43 +458,110 @@ void * SchemeEval::c_wrap_eval(void * p)
  * This method *must* be called in guile mode, in order for garbage
  * collection, etc. to work correctly!
  */
-std::string SchemeEval::do_eval(const std::string &expr)
+void SchemeEval::do_eval(const std::string &expr)
 {
 	per_thread_init();
 
 	// Set global atomspace variable in the execution environment.
 	SchemeSmob::ss_set_env_as(atomspace);
 
-	/* Avoid a string buffer copy if there is no pending input */
-	const char *expr_str;
-	bool newin = false;
-	if (_pending_input)
-	{
-		_input_line += expr;
-		expr_str = _input_line.c_str();
-	}
-	else
-	{
-		expr_str = expr.c_str();
-		newin = true;
-	}
+	_input_line += expr;
 
 	_caught_error = false;
 	_pending_input = false;
 	set_captured_stack(SCM_BOOL_F);
-	SCM rc = scm_c_catch (SCM_BOOL_T,
+	_rc = scm_c_catch (SCM_BOOL_T,
 	                      (scm_t_catch_body) scm_c_eval_string,
-	                      (void *) expr_str,
+	                      (void *) _input_line.c_str(),
 	                      SchemeEval::catch_handler_wrapper, this,
 	                      SchemeEval::preunwind_handler_wrapper, this);
 
+	atomspace = SchemeSmob::ss_get_env_as("do_eval");
+	_eval_done = true;
+	_wait_done.notify_all();
+}
+
+void SchemeEval::begin_eval()
+{
+	_eval_done = false;
+	_poll_done = false;
+	_rc = SCM_EOL;
+}
+
+/// Read one end of a pipe. The other end of the pipe is attached to
+/// guile's default output port.  We use standard posix to read, as
+/// that will be faster than mucking with guile's one-char-at-a-time
+/// API.  The below assumes that the pipe is non-blcoking; if it blocks,
+/// then things might get wonky.  The below is also very simple; it does
+/// not check for any standard unix errors, closed pipes, etc. I think
+/// that simplicity is just fine, here.
+std::string SchemeEval::poll_port()
+{
+	std::string rv;
+#define BUFSZ 1000
+	char buff[BUFSZ];
+	while (1)
+	{
+		int nr = read(_pipeno, buff, BUFSZ-1);
+		if (-1 == nr) return rv;
+		buff[nr] = 0x0;
+		rv += buff;
+	}
+	return rv;
+}
+
+/// Get output from evaluator, if any; block otherwise.
+///
+/// This method is meant to be called from a different thread than
+/// the one that the scheme evaluator is running in.  It will try
+/// to get any pending output, and will return that.  If there's no
+/// pending output, then it will block until (1) there's output, or
+/// (2) the evaluation has completed, in which case, it will return all
+/// remaining output generated by the eval.
+///
+/// The entire goal of this function is to allow the use of the guile
+/// 'display' can other stdio output calls from the interactive
+/// environment, even if the actual scheme eval is very long-running.
+/// Without this, what would happen is that all the output would get
+/// buffered up, until the eval() finished, and then all this output
+/// would get dumped.  For anything that runs more than a few seconds
+/// this would be confusing and undesirable.  So, this method allows
+/// some other thread to see if eval() is generating output, and, if
+/// it is, to print it to stdout.
+std::string SchemeEval::do_poll_result()
+{
+	per_thread_init();
+	if (_poll_done) return "";
+
+	if (not _eval_done)
+	{
+		// We don't have a real need to lock anything here; we're just
+		// using this as a hack, so that the condition variable will
+		// wake us up periodically.  The goal here is to block when
+		// there's no output to be reported.
+		//
+		// Hmmm. I guess we could just block on reading the pipe...
+		// unless the eval did not produce any output, in which case
+		// I guess we could ... close and re-open the pipe? Somehow
+		// unblock it?  I dunno. The below curently works, and I'm
+		// loosing interest just right now.
+		std::unique_lock<std::mutex> lck(_poll_mtx);
+		while (not _eval_done)
+		{
+			_wait_done.wait_for(lck, std::chrono::milliseconds(300));
+			std::string rv = poll_port();
+			if (0 < rv.size()) return rv;
+		}
+	}
+	// If we are here, then evaluation is done. Check the various
+	// evalution result flags, etc.
+	_poll_done = true;
+
 	/* An error is thrown if the input expression is incomplete,
-	 * in which case the error handler sets the pending_input flag
+	 * in which case the error handler sets the _pending_input flag
 	 * to true. */
 	if (_pending_input)
 	{
-		/* Save input for later */
-		if (newin) _input_line += expr;
 		return "";
 	}
 	_pending_input = false;
@@ -466,13 +569,13 @@ std::string SchemeEval::do_eval(const std::string &expr)
 
 	if (_caught_error)
 	{
+		std::string rv = poll_port();
+
 		char * str = scm_to_locale_string(error_string);
-		std::string rv = str;
+		rv += str;
 		free(str);
 		set_error_string(SCM_EOL);
 		set_captured_stack(SCM_BOOL_F);
-
-		scm_truncate_file(outport, scm_from_uint16(0));
 
 		rv += "\n";
 		return rv;
@@ -481,21 +584,15 @@ std::string SchemeEval::do_eval(const std::string &expr)
 	{
 		// First, we get the contents of the output port,
 		// and pass that on.
-		SCM out = scm_get_output_string(outport);
-		char * str = scm_to_locale_string(out);
-		std::string rv = str;
-		free(str);
-		scm_truncate_file(outport, scm_from_uint16(0));
+		std::string rv = poll_port();
 
 		// Next, we append the "interpreter" output
-		rv += prt(rc);
+		rv += prt(_rc);
 		rv += "\n";
-
 		return rv;
 	}
 	return "#<Error: Unreachable statement reached>";
 }
-
 
 /* ============================================================== */
 
@@ -530,6 +627,7 @@ SCM SchemeEval::do_scm_eval(SCM sexpr)
 	                 SchemeEval::catch_handler_wrapper, this,
 	                 SchemeEval::preunwind_handler_wrapper, this);
 
+	_eval_done = true;
 	if (_caught_error)
 	{
 		char * str = scm_to_locale_string(error_string);
@@ -539,7 +637,7 @@ SCM SchemeEval::do_scm_eval(SCM sexpr)
 		// error_string = SCM_EOL;
 		set_captured_stack(SCM_BOOL_F);
 
-		scm_truncate_file(outport, scm_from_uint16(0));
+		drain_output();
 
 		// Unlike errors seen on the interpreter, log these to the logger.
 		// That's because these errors will be predominantly script
@@ -554,26 +652,27 @@ SCM SchemeEval::do_scm_eval(SCM sexpr)
 		return SCM_EOL;
 	}
 
+	atomspace = SchemeSmob::ss_get_env_as("do_scm_eval");
+
 	// Get the contents of the output port, and log it
 	if (logger().isInfoEnabled())
 	{
-		SCM out = scm_get_output_string(outport);
-		char * str = scm_to_locale_string(out);
-		if (str && *str)
+		std::string str(poll_port());
+		if (0 < str.size())
 		{
 			logger().info("%s: Output: %s\n"
 			              "Was generated by expr: %s\n",
-			              __FUNCTION__, str, prt(sexpr).c_str());
+			              __FUNCTION__, str.c_str(), prt(sexpr).c_str());
 		}
-		free(str);
 	}
 
 	// If we are not in a shell context, truncate the output, because
 	// it will never ever be displayed. (i.e. don't overflow the output
 	// buffers.) If we are in_shell, then we are here probably because
-	// some ExecutionLink called some scheme snippet.  Display that.
-	if (not in_shell)
-		scm_truncate_file(outport, scm_from_uint16(0));
+	// user typed something that caused some ExecutionLink to call some
+	// scheme snippet.  Display that.
+	if (not _in_shell)
+		drain_output();
 
 	return rc;
 }
@@ -616,7 +715,7 @@ void * SchemeEval::c_wrap_eval_h(void * p)
  * do_scm_eval_str -- evaluate a scheme expression
  *
  * Similar to do_scm_eval(), but several important differences:
- * 1) The arugment must be a scheme in a string
+ * 1) The arugment must be a string containing valid scheme,
  * 2) No shell-freindly string and output management is performed,
  * 3) Evaluation errors are logged to the log file.
  *
@@ -638,13 +737,14 @@ SCM SchemeEval::do_scm_eval_str(const std::string &expr)
 	                      SchemeEval::catch_handler_wrapper, this,
 	                      SchemeEval::preunwind_handler_wrapper, this);
 
+	_eval_done = true;
 	if (_caught_error)
 	{
 		char * str = scm_to_locale_string(error_string);
 		set_error_string(SCM_EOL);
 		set_captured_stack(SCM_BOOL_F);
 
-		scm_truncate_file(outport, scm_from_uint16(0));
+		drain_output();
 
 		// Unlike errors seen on the interpreter, log these to the logger.
 		// That's because these errors will be predominantly script
@@ -659,19 +759,19 @@ SCM SchemeEval::do_scm_eval_str(const std::string &expr)
 		return SCM_EOL;
 	}
 
+	atomspace = SchemeSmob::ss_get_env_as("do_scm_eval_str");
+
 	// Get the contents of the output port, and log it
 	if (logger().isInfoEnabled())
 	{
-		SCM out = scm_get_output_string(outport);
-		char * str = scm_to_locale_string(out);
-		if (str && *str)
+		std::string str(poll_port());
+		if (0 < str.size())
 		{
 			logger().info("%s: Output: %s\nWas generated by expr: %s\n",
-			              __FUNCTION__, str, expr.c_str());
+			              __FUNCTION__, str.c_str(), expr.c_str());
 		}
-		free(str);
 	}
-	scm_truncate_file(outport, scm_from_uint16(0));
+	drain_output();
 
 	return rc;
 }
@@ -723,7 +823,7 @@ void * SchemeEval::c_wrap_apply(void * p)
  * XXX This seems awfully hacky to me -- is this really a good idea?
  * Isn't there some other, better way of accomplishing this?  My
  * gut instinct is the say "this should be reviewed and possibly
- * dprecated/removed". XXX
+ * deprecated/removed". XXX
  */
 std::string SchemeEval::apply_generic(const std::string &func, Handle varargs)
 {

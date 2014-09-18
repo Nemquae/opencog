@@ -39,7 +39,7 @@
 
 #include <opencog/nlp/types/atom_types.h>
 #include <opencog/spacetime/atom_types.h>
-#include <opencog/query/PatternMatch.h>
+#include <opencog/query/BindLink.h>
 
 #include <opencog/spacetime/HandleTemporalPairEntry.h>
 #include <opencog/spacetime/SpaceServer.h>
@@ -888,9 +888,7 @@ std::vector<Handle> AtomSpaceUtil::getInheritanceLinks(AtomSpace & atomSpace, Ha
     Handle hBindLink = atomSpace.addLink(BIND_LINK, bindLinkOutgoings,TruthValue::TRUE_TV());
 
     // Run pattern matcher
-    PatternMatch pm;
-    pm.set_atomspace(&atomSpace);
-    Handle hResultListLink = pm.bindlink(hBindLink);
+    Handle hResultListLink = bindlink(&atomSpace, hBindLink);
 
     // Get result
     // Note: Don't forget remove the hResultListLink, otherwise some scheme script
@@ -923,9 +921,7 @@ std::vector<Handle> AtomSpaceUtil::getNodesByInheritanceLink(AtomSpace & atomSpa
     Handle hBindLink = atomSpace.addLink(BIND_LINK, bindLinkOutgoings,TruthValue::TRUE_TV());
 
     // Run pattern matcher
-    PatternMatch pm;
-    pm.set_atomspace(&atomSpace);
-    Handle hResultListLink = pm.bindlink(hBindLink);
+    Handle hResultListLink = bindlink(&atomSpace, hBindLink);
 
     // Get result
     // Note: Don't forget remove the hResultListLink, otherwise some scheme script
@@ -978,9 +974,7 @@ std::vector<Handle> AtomSpaceUtil::getEvaluationLinks(AtomSpace &atomSpace, stri
 
 
     // Run pattern matcher
-    PatternMatch pm;
-    pm.set_atomspace(&atomSpace);
-    Handle hResultListLink = pm.bindlink(hBindLink);
+    Handle hResultListLink = bindlink(&atomSpace, hBindLink);
 
     // Get result
     // Note: Don't forget remove the hResultListLink, otherwise some scheme script
@@ -1031,9 +1025,7 @@ std::vector<Handle> AtomSpaceUtil::getNodesByEvaluationLink(AtomSpace &atomSpace
 
 
     // Run pattern matcher
-    PatternMatch pm;
-    pm.set_atomspace(&atomSpace);
-    Handle hResultListLink = pm.bindlink(hBindLink);
+    Handle hResultListLink = bindlink(&atomSpace, hBindLink);
 
     // Get result
     // Note: Don't forget remove the hResultListLink, otherwise some scheme script
@@ -1066,9 +1058,7 @@ Handle AtomSpaceUtil::getReferenceLink(AtomSpace & atomSpace, Handle hFirstOutgo
     Handle hBindLink = atomSpace.addLink(BIND_LINK, bindLinkOutgoings,TruthValue::TRUE_TV());
 
     // Run pattern matcher
-    PatternMatch pm; 
-    pm.set_atomspace(&atomSpace); 
-    Handle hResultListLink = pm.bindlink(hBindLink);
+    Handle hResultListLink = bindlink(&atomSpace, hBindLink);
 
     // Get result
     // Note: Don't forget remove the hResultListLink, otherwise some scheme script
@@ -2651,7 +2641,10 @@ bool AtomSpaceUtil::getDemandEvaluationLinks (AtomSpace & atomSpace,
     Handle hEvaluationLinkDemandGoal = atomSpace.addLink(EVALUATION_LINK, tempOutgoings,TruthValue::TRUE_TV());
 
     tempOutgoings.clear(); 
-    tempOutgoings.push_back( atomSpace.addNode(GROUNDED_PREDICATE_NODE, "fuzzy_within") ); 
+    tempOutgoings.push_back( 
+        // Must quote the GPN, else the pattern matcher tries to evaluate it!
+        atomSpace.addLink(QUOTE_LINK,
+                          atomSpace.addNode(GROUNDED_PREDICATE_NODE, "fuzzy_within")) );
     tempOutgoings.push_back(hVariableNodeListLink); 
     Handle hEvaluationLinkFuzzyWithin = atomSpace.addLink(EVALUATION_LINK, tempOutgoings,TruthValue::TRUE_TV());
 
@@ -2672,9 +2665,7 @@ bool AtomSpaceUtil::getDemandEvaluationLinks (AtomSpace & atomSpace,
     Handle hBindLink = atomSpace.addLink(BIND_LINK, tempOutgoings,TruthValue::TRUE_TV());
 
     // Run pattern matcher
-    PatternMatch pm; 
-    pm.set_atomspace(&atomSpace); 
-    Handle hResultListLink = pm.bindlink(hBindLink);
+    Handle hResultListLink = bindlink(&atomSpace, hBindLink);
 
     // Get result
     // Note: Don't forget remove the hResultListLink, otherwise some scheme script

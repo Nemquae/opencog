@@ -1,4 +1,4 @@
-/** deme_expander.cc --- 
+/** deme_expander.cc ---
  *
  * Copyright (C) 2013 OpenCog Foundation
  * Copyright (C) 2014 Aidyia Limited
@@ -9,12 +9,12 @@
  * it under the terms of the GNU Affero General Public License v3 as
  * published by the Free Software Foundation and including the exceptions
  * at http://opencog.org/wiki/Licenses
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU Affero General Public License
  * along with this program; if not, write to:
  * Free Software Foundation, Inc.,
@@ -71,7 +71,7 @@ void deme_expander::log_selected_feature_sets(const feature_set_pop& sf_pop,
         logger().info() << "Of these, " << xmplr_sf.size()
                         << " are already in the exemplar, and " << new_sf.size()
                         << " are new.";
- 
+
         ostreamContainer(logger().info() << "Selected features which are in the exemplar: ",
                          fs_to_names(xmplr_sf, ilabels), ",");
         ostreamContainer(logger().info() << "Selected features which are new: ",
@@ -158,14 +158,23 @@ void deme_expander::create_demeIDs(int n_expansions)
 
 bool deme_expander::create_representations(const combo_tree& exemplar)
 {
-    // 'On-the-fly' feature selection.  This limits the number of
-    // features that will be used to build the deme to a smaller,
-    // more manageable number.  This is extremely useful when the
-    // dataset has thousands of features; pruning these to a few
-    // hundred or a few dozen sharply reduces the number of knobs
-    // in the representation.  This step differs from an ordinary
-    // one-time only, up-front round of feature selection by using
-    // only those features which score well with the current exemplar.
+    // 'On-the-fly' (dynamic, boosted) feature selection.
+    // This limits the number of features that will be used to build
+    // the deme to a smaller, more manageable number.  This is extremely
+    // useful when the dataset has thousands of features; pruning these
+    // to a few hundred or a few dozen sharply reduces the number of knobs
+    // in the representation.  Fewer knobs means a much smaller search
+    // space, which can be explored more quickly.  It also means a smaller
+    // rep, which can be reduced and evaluated more quickly.
+    //
+    // Typically (depending on the options) the feature selection
+    // focuses on those features that correlate well with the incorrect
+    // predictions of the current exemplar.  The idea is that these can
+    // be used to fix the exemplar.
+    //
+    // This differs sharply from static, one-time-only, up-front feature
+    // pre-selection, which only limits the total number of features that
+    // MOSES can work with.
     std::vector<operator_set> ignore_ops_seq, considered_args_seq;
     std::vector<combo_tree> xmplr_seq;
     if (_params.fstor) {
@@ -174,7 +183,7 @@ bool deme_expander::create_representations(const combo_tree& exemplar)
 
         // Return multiple sets of selected features.  Each feature set
         // is a collection of integer-valued column indexes; with zero
-        // denotion the left-most column corresponds.
+        // denoting the left-most column corresponds.
         auto pop_of_selected_feats = festor(exemplar);
 
         // Get the set of features used in the exemplar.
@@ -200,8 +209,10 @@ bool deme_expander::create_representations(const combo_tree& exemplar)
         for (auto& selected_feats : pop_of_selected_feats) {
             logger().debug() << "Deme " << _demeIDs[sfi] << ":";
 
-            // Either prune the exemplar, or add all exemplars
-            // features to the feature sets
+            // Either prune the exemplar, or add all of the features used
+            // by the exemplar, to each feature set.  We need to do this
+            // because ... ??? why?  In particular, why would we ever
+            // want to prune the exemplar? I can't figure this out.
             if (festor.params.prune_xmplr) {
                 auto xmplr_nsf = set_difference(xmplr_features,
                                                 selected_feats.second);
@@ -352,7 +363,7 @@ combo_tree deme_expander::prune_xmplr(const combo_tree& xmplr,
  * some explicit graphs demonstrating this in the diary archive folder.)
  * Given that almost all of the selected features end up attached to
  * useless knobs, and are thus discarded after deme optimization and
- * merging, I just completely fail to see how a minor twiddle in the 
+ * merging, I just completely fail to see how a minor twiddle in the
  * dynamic feature set makes any difference.  I mean, if you want to
  * explore more stuff, why not just use a slightly larger feature set
  * size?  For example, just use the union of the top N feature sets.
@@ -372,7 +383,7 @@ bool deme_expander::create_demes(const combo_tree& exemplar, int n_expansions)
     create_demeIDs(n_expansions);
 
     create_representations(exemplar);
-    
+
     // Create empty demes with their IDs
     for (unsigned i = 0; i < _reps.size(); i++) {
         if (_filter_params.n_subsample_demes > 1) {
@@ -410,7 +421,7 @@ void deme_expander::optimize_demes(int max_evals, time_t max_time)
             subsample_by_time();
 
         for (unsigned j = 0; j < n_ss_demes; j++)
-        {    
+        {
             if (logger().isDebugEnabled()) {
                 std::stringstream ss;
                 ss << "Optimize deme " << _demes[i][j].getID() << "; "
@@ -422,8 +433,8 @@ void deme_expander::optimize_demes(int max_evals, time_t max_time)
                 // Attempt to compress the CTable further (to optimize and
                 // update max score)
                 _cscorer.ignore_cols(_ignore_cols_seq[i]);
-        
-                // compute the max target for that deme (if features have been
+
+                // Compute the max target for that deme (if features have been
                 // dynamically selected, it might be less that the global target;
                 // that is, the deme might not be able to reach the best score.)
                 //
@@ -431,30 +442,36 @@ void deme_expander::optimize_demes(int max_evals, time_t max_time)
                 // OPTION ISN'T GLOBAL WHAT TO DO?
                 //
                 // But why would we want to over-ride the best-possible score?
-                // Typically, demes almost never hit the best score anyway, so
-                // why would this matter?
+                // The point here is to figure out when to stop working on the
+                // deme, and not when to stop working onthe problem as a whole,
+                // right?
                 score_t deme_target_score = _cscorer.best_possible_score();
                 logger().info("Inferred target score for that deme = %g",
                               deme_target_score);
-                // negative min_improv is interpreted as percentage of
-                // improvement, if so then don't substract anything, since in that
-                // scenario the absolute min improvent can be arbitrarily small
                 logger().info("It appears there is an algorithmic bug in "
                               "precision_bscore::best_possible_bscore. "
                               "Till not fixed we shall not rely on it to "
-                              "terminate deme search");
+                              "terminate deme search. Except I think this "
+                              "is fixed now. It needs review and testing.");
 
                 // TODO: re-enable that once best_possible_bscore is fixed
-                // score_t actual_min_improv = std::max(_cscorer.min_improv(),
-                //                                      (score_t)0);
-                // deme_target_score -= actual_min_improv;
-                // logger().info("Subtract %g (minimum significant improvement) "
-                //               "from the target score to deal with float "
-                //               "imprecision = %g",
-                //               actual_min_improv, deme_target_score);
+                // I think its now fixed, but I'm not sure.  It needs to be
+                // reviewed and tested.
+#if THIS_IS_DISABLED_UNTIL_ABOVE_IS_FIXED
+                // negative min_improv is interpreted as percentage of
+                // improvement, if so then don't substract anything, since in that
+                // scenario the absolute min improvent can be arbitrarily small
+                score_t actual_min_improv = std::max(_cscorer.min_improv(),
+                                                     (score_t)0);
+                deme_target_score -= actual_min_improv;
+                logger().info("Subtract %g (minimum significant improvement) "
+                              "from the target score to deal with float "
+                              "imprecision = %g",
+                              actual_min_improv, deme_target_score);
 
-                // // update max score optimizer
-                // _optimize.opt_params.terminate_if_gte = deme_target_score;
+                // update max score optimizer
+                _optimize.opt_params.terminate_if_gte = deme_target_score;
+#endif // THIS_IS_DISABLED_UNTIL_ABOVE_IS_FIXED
             }
 
             if (n_ss_demes > 1) {

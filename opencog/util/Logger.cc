@@ -59,6 +59,10 @@
 #include "Logger.h"
 #include "Config.h"
 
+#ifdef __APPLE__
+#define fdatasync fsync
+#endif
+
 using namespace opencog;
 
 // messages greater than this will be truncated
@@ -78,6 +82,9 @@ static void prt_backtrace(std::ostringstream& oss)
 #else
 	char **syms = backtrace_symbols(bt_buf, stack_depth);
 #endif
+
+    // Depending on how the dependencies are met, syms could be NULL 
+    if (syms == NULL) return;
 
 	// Start printing at a bit into the stack, so as to avoid recording
 	// the logger functions in the stack trace.

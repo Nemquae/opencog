@@ -35,21 +35,10 @@ struct eval_candidate_params
         target_feature_str;
     // parameters
     std::string problem;
-    double noise;
-    bool normalize;
-    double complexity_amplifier;
-    // prerec parameters
-    double prerec_min_recall;
-    bool prerec_simple_precision;
 };
 
 // problems
-static const std::string it="it"; // regression based on input table
-                                  // maximize accuracy.
-
-static const std::string prerec="prerec"; // regression based on input table,
-                                          // maximize precision, while holding
-                                          // recall const.
+static const std::string f_one="f_one";
 
 } // ~namespace moses
 } // ~namespace opencog

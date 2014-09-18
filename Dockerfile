@@ -1,32 +1,62 @@
-# For use with Docker https://www.docker.io/gettingstarted/
-#
-# Quickstart:
-# docker build -t $USER/opencog .
-# docker run --name cogserver -d -p 17001:17001 -p 5000:5000 $USER/opencog
-# docker logs cogserver
+# Replace all instances of shujingke with your github / docker.io / system username.
+# Replace hk.archive.ubuntu.com with your own country code, e.g. nl.archive.ubuntu.com
+# adduser shujingke
+# cd ~ && git clone http://shujingke@github.com/shujingke/opencog && cd opencog && git pull
+# docker build -t shujingke/opencog-dev-qt .
+# xhost +
+# docker run --rm -i -v /tmp/.X11-unix/X0:/tmp/.X11-unix/X0 -v /etc/passwd:/etc/passwd -v /etc/shadow:/etc/shadow -v /etc/group:/etc/group -v /etc/group-:/etc/group- -v /home/shujingke:/home/shujingke -e DISPLAY=:0.0 -t shujingke/opencog-dev-qt 
+# remote
+# ssh -L 17001:localhost:17001 -XC hostname 'docker run --rm -i -v /home/shujingke:/home/shujingke -e DISPLAY=$DISPLAY -p 17001:17001 -t shujingke/opencog-dev-qt'
+# for gnome-panel fix, install locally, configure panels (top panel alt-super-right-click: delete this panel; bottom panel: alt-super-right-click: add to panel: main menu), then re-run container
 
 FROM ubuntu:14.04
+MAINTAINER Alex van der Peet "alex.van.der.peet@gmail.com"
 MAINTAINER David Hart "dhart@opencog.org"
-RUN echo "deb http://archive.ubuntu.com/ubuntu trusty main universe" > /etc/apt/sources.list
-RUN echo "deb http://archive.ubuntu.com/ubuntu trusty-updates main universe" >> /etc/apt/sources.list
-RUN apt-get update 
-RUN apt-get -y install software-properties-common wget sudo 
 
-# ocpkg tool to install repositories and dependencies
-ADD scripts/ocpkg /octool
-RUN chmod +x /octool 
-RUN /octool -v -a -d
+RUN sed 's/archive.ubuntu.com/hk.archive.ubuntu.com/' -i /etc/apt/sources.list
 
-# hack for libiberty package found in trusty main
-RUN sed -i s:"ansidecl.h":\<libiberty/ansidecl.h\>:g /usr/include/bfd.h
+RUN apt-get -y update
+RUN apt-get -y install software-properties-common git
 
-# build opencog
-ADD . /opencog
-RUN ln -s -v /opencog /opencog/src
-RUN mkdir -v /opencog/build
-RUN /octool -v -b -l /opencog/build
+ADD scripts/ocpkg install-dependencies-trusty
+RUN chmod +x /install-dependencies-trusty
+RUN /install-dependencies-trusty
 
-# Start cogserver when container runs
-WORKDIR /opencog/build
-CMD ["-c",  "/opencog/lib/opencog.conf"]
-ENTRYPOINT ["/opencog/build/opencog/server/cogserver"] 
+RUN apt-get -y install wget tmux
+RUN apt-get -y install gitg
+RUN apt-get -y install git-gui
+RUN apt-get -y install meld
+RUN apt-get -y install qtcreator
+RUN apt-get -y install gnome-session
+RUN apt-get -y install gnome-panel
+RUN apt-get -y install gnome-terminal
+RUN apt-get -y install nautilus
+RUN apt-get -y install vim-gnome
+RUN apt-get -y remove brasero gnome-media
+
+RUN apt-get -y install gtk2-engines-murrine sudo
+
+RUN adduser --disabled-password --gecos "Shujing Ke,,," shujingke
+RUN adduser shujingke adm
+
+RUN mkdir /var/run/dbus
+
+WORKDIR /home/shujingke
+USER shujingke
+ENV USER shujingke
+ENV HOME /home/shujingke
+
+ENV STARTSCRIPT "\
+echo evaluating startup script... ;\
+cd $HOME;\
+tmux new-session -d 'echo "kernel.yama.ptrace_scope=0" > /etc/sysctl.d/10-ptrace.conf' ;\
+tmux new-session -d '/usr/bin/gnome-panel&/bin/bash' ;\
+tmux set -g set-remain-on-exit on ;\
+tmux set-option -g set-remain-on-exit on ;\
+tmux bind-key R respawn-window ;\
+tmux split-window -d -v -p 25 '/bin/bash' ;\
+tmux select-layout even-vertical ;\
+tmux attach \
+"
+
+CMD /bin/bash -l -c "eval $STARTSCRIPT"

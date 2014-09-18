@@ -39,6 +39,7 @@ namespace opencog
 {
 namespace PatternMining
 {
+#define FLOAT_MIN_DIFF 0.00001
 
  struct _non_ordered_pattern
  {
@@ -96,11 +97,23 @@ namespace PatternMining
 
      unsigned int cur_index;
 
+     float last_gram_total_float;
+
      unsigned int thresholdFrequency; // patterns with a frequency lower than thresholdFrequency will be neglected, not grow next gram pattern from them
 
-     std::mutex allAtomListLock, uniqueKeyLock, patternForLastGramLock, removeAtomLock, patternMatcherLock;
+     std::mutex uniqueKeyLock, patternForLastGramLock, removeAtomLock, patternMatcherLock, addNewPatternLock, calculateIILock;
 
      Type ignoredTypes[1];
+
+     bool enable_Frequent_Pattern;
+     bool enable_Interesting_Pattern;
+
+     // Only effective when Enable_Interesting_Pattern is true. The options are "Interaction_Information", "surprisingness"
+     string interestingness_Evaluation_method;
+
+     float atomspaceSizeFloat;
+
+     vector<vector<vector<unsigned int>>> components_ngram[3];
 
      // this is to against graph isomorphism problem, make sure the patterns we found are not dupicacted
      // the input links should be a Pattern in such format:
@@ -142,6 +155,10 @@ namespace PatternMining
       // valueToVarMap:  the ground value node in the orginal Atomspace to the variable handle in pattenmining Atomspace
      void extractAllNodesInLink(Handle link, map<Handle,Handle>& valueToVarMap);
      void extractAllNodesInLink(Handle link, set<Handle>& allNodes); // just find all the nodes in the original atomspace for this link
+     void extractAllVariableNodesInLink(Handle link, set<Handle>& allNodes, AtomSpace* _atomSpace);
+
+     // if a link contains only variableNodes , no const nodes
+     bool onlyContainVariableNodes(Handle link, AtomSpace* _atomSpace);
 
      void extractAllPossiblePatternsFromInputLinks(vector<Handle>& inputLinks, HTreeNode* parentNode, set<Handle> &sharedNodes, unsigned int gram = 1);
 
@@ -165,7 +182,11 @@ namespace PatternMining
 
      void GrowAllPatterns();
 
+     void reportProgress();
+
      bool isInHandleSeq(Handle handle, HandleSeq &handles);
+
+     bool isInHandleSeqSeq(Handle handle, HandleSeqSeq &handleSeqs);
 
      bool containsDuplicateHandle(HandleSeq &handles);
 
@@ -191,17 +212,29 @@ namespace PatternMining
 
      const static string ignoreKeyWords[];
 
+     bool splitDisconnectedLinksIntoConnectedGroups(HandleSeq& inputLinks, HandleSeqSeq& outputConnectedGroups);
+
+     double calculateEntropyOfASubConnectedPattern(string& connectedSubPatternKey, HandleSeq& connectedSubPattern);
+
+     void calculateInteractionInformation(HTreeNode* HNode);
+
+     void generateComponentCombinations(string componentsStr, vector<vector<vector<unsigned int>>> &componentCombinations);
+
+     unsigned int getCountOfASubConnectedPattern(string& connectedSubPatternKey, HandleSeq& connectedSubPattern);
+
+     void calculateSurprisingness( HTreeNode* HNode);
+
  public:
      PatternMiner(AtomSpace* _originalAtomSpace, unsigned int max_gram = 3);
      ~PatternMiner();
 
      bool checkPatternExist(const string& patternKeyStr);
 
-     void OutPutPatternsToFile(unsigned int n_gram);
+     void OutPutPatternsToFile(unsigned int n_gram, bool is_interesting_pattern = false);
 
-     void runPatternMiner(unsigned int _thresholdFrequency = 1);
+     void runPatternMiner(unsigned int _thresholdFrequency = 2);
 
-     void selectSubsetFromCorpus(vector<string> &topics, unsigned int gram = 3);
+     void selectSubsetFromCorpus(vector<string> &topics, unsigned int gram = 2);
 
      void testPatternMatcher1();
      void testPatternMatcher2();

@@ -121,18 +121,14 @@ int main(int argc, char** argv)
         ("version,v", "Display the version number.\n")
 
         (opt_desc_str(algo_opt).c_str(),
-         value<string>(&fs_params.algorithm)->default_value(smd),
+         value<string>(&fs_params.algorithm)->default_value("simple"),
          string("Feature selection algorithm. Supported algorithms are:\n")
-             /*
-              * We're not going to support univariate or sa any time
-              * soon, and maybe never; they're kind-of deprecated in
-              * MOSES, at the moment.
-             .append(un).append(" for univariate,\n")
-             .append(sa).append(" for simulated annealing,\n")
-             */
-             .append(smd).append(" for stochastic maximal dependency,\n")
+             .append("simple for maximum mutual information,\n")
+             .append("smd for stochastic mutual dependency,\n")
+             .append("inc for incremental max-relevancy, min-redundancy.\n")
              .append(moses::hc).append(" for moses-hillclimbing,\n")
-             .append(inc).append(" for incremental max-relevancy, min-redundancy.\n").c_str())
+             .append("random for uniform, random selection.\n")
+             .append("The edefault is \"simple\".\n").c_str())
 
         (opt_desc_str(scorer_opt).c_str(),
          value<string>(&fs_params.scorer)->default_value(mi),
@@ -145,11 +141,16 @@ int main(int argc, char** argv)
         // ======= File I/O opts =========
         (opt_desc_str(input_data_file_opt).c_str(),
          value<string>(&fs_params.input_file),
-         "Input table file in DSV format (seperators are comma, whitespace and tabulation).\n")
+         "Input table file in DSV format (seperators are comma, "
+         "whitespace and tabulation).\n")
 
         (opt_desc_str(target_feature_opt).c_str(),
          value<string>(&fs_params.target_feature_str),
          "Label of the target feature to fit. If none is given the first one is used.\n")
+
+        ("timestamp-feature",
+         value<string>(&fs_params.timestamp_feature_str),
+         "Label of the timestamp feature. If none is given it is ignored.\n")
 
         (opt_desc_str(ignore_feature_opt).c_str(),
          value<vector<string>>(&fs_params.ignore_features_str),
@@ -423,23 +424,6 @@ int main(int argc, char** argv)
     type_tree inferred_tt = table.get_signature();
     type_tree output_tt = get_signature_output(inferred_tt);
     type_node inferred_type = get_type_node(output_tt);
-
-    if (inferred_type == id::contin_type) {
-        if (1 < fs_params.inc_interaction_terms) {
-            cerr << "Fatal Error: Currently, contin feature selection "
-                    "does not support more than one interaction term."
-                 << endl;
-            exit(1);
-        }
-        if (0.0 < fs_params.inc_red_intensity) {
-            // Its not supported, because it requires tw interaction
-            // terms to be computed for MI, and I am too lazy ...
-            cerr << "Fatal Error: Currently, contin feature selection "
-                    "does not support redundant feature removal."
-                 << endl;
-            exit(1);
-        }
-    }
 
     // Go and do it.
     if ((inferred_type == id::boolean_type) or
