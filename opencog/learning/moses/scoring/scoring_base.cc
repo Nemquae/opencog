@@ -112,9 +112,24 @@ complexity_t bscore_base::get_complexity(const scored_combo_tree_set& ensemble) 
 score_t
 bscore_base::get_error(const behavioral_score&) const
 {
-    OC_ASSERT(false, "score error not implemented for bscorer %s",
+    OC_ASSERT(false, "bscore error not implemented for bscorer %s",
         typeid(*this).name());
-    return -1.0;
+    return 1.0;
+}
+
+score_t
+bscore_base::get_error(const combo_tree& tr) const
+{
+    // This is the correct result for most cases, except for precision-
+    // scorer-like cases.  However, it should never be called for the
+    // 'usual' non-precion case; the cached bascore should be used
+    // instead.  This should only be called for the precision scorer.
+    // Thus, to avoid mis-use, we assert here.
+    //
+    // return get_error(operator()(tr));
+    OC_ASSERT(false, "tree error not implemented for bscorer %s",
+        typeid(*this).name());
+    return 1.0;
 }
 
 score_t bscore_base::sum_bscore(const behavioral_score& bs) const
@@ -157,6 +172,12 @@ void bscore_base::update_weights(const std::vector<double>& rew)
     OC_ASSERT(rew.size() == _size,
         "Unexpected size of weight array!");
 
+#if 1
+    // Simple rescaling, without normalization.
+    for (size_t i = 0; i < _size; i++) {
+        _weights[i] *= rew[i];
+    }
+#else
     double znorm = 0.0;
     for (size_t i = 0; i < _size; i++) {
         _weights[i] *= rew[i];
@@ -168,6 +189,7 @@ void bscore_base::update_weights(const std::vector<double>& rew)
     // to make get_error() return the right thing ...
     znorm = 1.0 / znorm;
     for (size_t i=0; i<_size; i++) _weights[i] *= znorm;
+#endif
 }
 
 ////////////////////////

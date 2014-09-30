@@ -1,6 +1,7 @@
 /** eval-candidate.cc --- 
  *
  * Copyright (C) 2013 OpenCog Foundation
+ * Copyright (C) 2014 Aidyia Limited
  *
  * Author: Nil Geisweiller <ngeiswei@gmail.com>
  *
@@ -32,15 +33,18 @@
 #include <boost/program_options.hpp>
 #include <boost/format.hpp>
 
-#include <opencog/comboreduct/combo/iostream_combo.h>
-#include <opencog/util/oc_assert.h>
 #include <opencog/util/iostreamContainer.h>
+#include <opencog/util/oc_assert.h>
+
+#include <opencog/comboreduct/combo/iostream_combo.h>
 #include <opencog/comboreduct/table/table_io.h>
 #include <opencog/learning/moses/moses/types.h>
 #include <opencog/learning/moses/moses/complexity.h>
 
 #include "../scoring/discriminating_bscore.h"
 #include "../scoring/behave_cscore.h"
+#include "../scoring/bscores.h"
+#include "../scoring/precision_bscore.h"
 
 #include "eval-candidate.h"
 
@@ -70,6 +74,24 @@ combo_tree str2combo_tree_label(const std::string& combo_prog_str,
     return tr;
 }
 
+/**
+ * Reverse of str2combo_tree_label
+ *
+ * @param combo_prog       combo tree of the program
+ * @param labels           a vector of labels
+ * @return                 string representing the combo tree with labels
+ */
+std::string combo_tree2str_label(const combo_tree& tr,
+                                 const std::vector<std::string>& input_labels)
+{
+    // Stream combo tree into a string
+    stringstream ss;
+    ss << tr;
+
+    // Replace the place holders by labels
+    return ph2l(ss.str(), input_labels);
+}
+
 vector<string> get_all_combo_tree_str(const eval_candidate_params& ecp)
 {
     vector<string> res;
@@ -96,11 +118,23 @@ vector<string> get_all_combo_tree_str(const eval_candidate_params& ecp)
 
 std::ostream& ostream_scored_trees(std::ostream& out,
                                    const vector<combo_tree>& trs,
-                                   const vector<composite_score>& css) {
+                                   const vector<composite_score>& css,
+                                   const eval_candidate_params& ecp,
+                                   const vector<string>& ilabels) {
     unsigned size = trs.size();
     OC_ASSERT(size == css.size());
-    for (unsigned i = 0; i < size; ++i)
-        out << css[i].get_score() << " " << trs[i] << std::endl;
+    for (unsigned i = 0; i < size; ++i) {
+        // Stream out score
+        out << css[i].get_score() << " ";
+
+        // Stream out tree
+        if (ecp.output_with_labels)
+            out << combo_tree2str_label(trs[i], ilabels);
+        else
+            out << trs[i];
+
+        out << std::endl;
+    }
     return out;
 }
 
@@ -128,12 +162,21 @@ int main(int argc, char** argv)
         ("target-feature,u", po::value<string>(&ecp.target_feature_str),
          "Name of the target feature.\n")
 
-        ("combo-program-file,C", po::value<vector<string>>(&ecp.combo_program_files),
+        ("combo-program-file,C",
+         po::value<vector<string>>(&ecp.combo_program_files),
          "File containing combo programs. "
          "Can be used several times for several files.\n")
 
         ("output-file,o", po::value<string>(&ecp.output_file),
          "File to write the results. If none is given it write on the stdout.\n")
+
+        ("output-with-labels,W",
+         po::value<bool>(&ecp.output_with_labels)->default_value(false),
+         "If 1, output the candidates with argument labels "
+         "instead of argument numbers. For instance "
+         "*(\"$price\" \"$temperature\") instead of *($1 $2), "
+         "where price and temperature are the first two features "
+         "of the input table.\n")
 
         ("level,l", po::value<string>(&log_level)->default_value("INFO"),
          "Log level, possible levels are NONE, ERROR, WARN, INFO, "
@@ -145,10 +188,39 @@ int main(int argc, char** argv)
 
         // Parameters
         ("problem,H", po::value<string>(&ecp.problem)->default_value(f_one),
-         str(boost::format("Problem to solve, supported problems are:\n\n"
-                           "%s, regression based on input table, maximizing F1-score\n")
-             % f_one).c_str())
+         "Scorer to run. Supported scorers all erquire an input table. "
+         "Supported scorers are:\n\n"
+         "\trecall: show recall\n"
+         "\tprerec: show precision\n"
+         "\tf_one:  show F1-score (geometric mean of precision and recall)\n"
+         "\tbep:    break-even point (difference between precision and recall)\n"
+         "\tit:     accuracy scorer\n"
+         "\tpre:    precision-activation scorer\n")
 
+        ("alpha,Q",
+         po::value<double>(&ecp.activation_pressure)->default_value(1.0),
+         "pre scorer: Activation pressure.\n"
+         "recall, prerec, bep scorers: Hardness.\n"
+         "\nIf the score is not between the minimum and mixiimum, it is "
+         "penalized with the pressure/hardness penalty.\n" )
+
+        (",q",
+         po::value<double>(&ecp.min_activation)->default_value(0.0),
+         "pre scorer: Minimum activation.\n"
+         "prerec scorer: Minimum recall.\n"
+         "recall scorer: Minimum precision.\n"
+         "bep    scorer: Minimum difference between precision and recall.\n"
+         "\nIf the score is not between the minimum and mixiimum, it is "
+         "penalized with the pressure/hardness penalty.\n" )
+
+        (",w",
+         po::value<double>(&ecp.max_activation)->default_value(1.0),
+         "pre scorer: Maximum activation.\n"
+         "prerec scorer: Maximum recall.\n"
+         "recall scorer: Maximum precision.\n"
+         "bep    scorer: Maximum difference between precision and recall.\n"
+         "\nIf the score is not between the minimum and mixiimum, it is "
+         "penalized with the pressure/hardness penalty.\n" )
         ;
 
     po::variables_map vm;
@@ -179,6 +251,13 @@ int main(int argc, char** argv)
     }
     logger().setBackTraceLevel(Logger::ERROR);
 
+    // Record original command line
+    std::stringstream ss;
+    for (int i=0; i<argc; i++) {
+        ss << " " << argv[i];
+    }
+    logger().info() << "Command line:" << ss.str();
+
     // init random generator
     randGen().seed(rand_seed);
 
@@ -193,16 +272,42 @@ int main(int argc, char** argv)
     vector<combo_tree> trs;
     for (const string& tr_str : all_combo_tree_str) {
         combo_tree tr = str2combo_tree_label(tr_str, it.get_labels());
-        if (logger().isFineEnabled()) {
+        if (logger().isDebugEnabled()) {
             logger().fine() << "Combo str: " << tr_str;
-            logger().fine() << "Parsed combo: " << tr;
+            logger().debug() << "Parsed combo: " << tr;
         }
         trs.push_back(tr);
     }
 
-    // Define scorer (only support f_one for now)
-    f_one_bscore bscore(table.compressed());
-    behave_cscore bcscore(bscore);
+    // Define scorer
+    bscore_base* bscore = nullptr;
+    if ("recall" == ecp.problem) {
+        bscore = new recall_bscore(table.compressed(),
+            ecp.min_activation, ecp.max_activation, ecp.activation_pressure);
+    }
+    else if ("prerec" == ecp.problem) {
+        bscore = new prerec_bscore(table.compressed(),
+            ecp.min_activation, ecp.max_activation, ecp.activation_pressure);
+    }
+    else if ("bep" == ecp.problem) {
+        bscore = new bep_bscore(table.compressed(),
+            ecp.min_activation, ecp.max_activation, ecp.activation_pressure);
+    }
+    else if ("f_one" == ecp.problem) {
+        bscore = new f_one_bscore(table.compressed());
+    }
+    else if ("it" == ecp.problem) {
+        bscore = new ctruth_table_bscore(table.compressed());
+    }
+    else if ("pre" == ecp.problem) {
+        bscore = new precision_bscore(table.compressed(),
+            ecp.activation_pressure, ecp.min_activation, ecp.max_activation);
+    }
+    else {
+        OC_ASSERT(false, "Unknown scorer type.");
+    }
+
+    behave_cscore bcscore(*bscore);
 
     // Evaluate the fitness score of each program
     vector<composite_score> css;
@@ -211,9 +316,9 @@ int main(int argc, char** argv)
 
     // Output the trees preceded by their scores
     if(ecp.output_file.empty())
-        ostream_scored_trees(cout, trs, css);
+        ostream_scored_trees(cout, trs, css, ecp, it.get_labels());
     else {
         ofstream of(ecp.output_file.c_str());
-        ostream_scored_trees(of, trs, css);
+        ostream_scored_trees(of, trs, css, ecp, it.get_labels());
     }
 }
