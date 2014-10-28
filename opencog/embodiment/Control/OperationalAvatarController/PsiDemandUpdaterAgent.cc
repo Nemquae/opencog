@@ -70,6 +70,17 @@ bool PsiDemandUpdaterAgent::Demand::runUpdater(AtomSpace & atomSpace)
 
 bool PsiDemandUpdaterAgent::Demand::updateDemandGoal (AtomSpace & atomSpace, const unsigned long timeStamp)
 {
+
+
+//    // Get the GroundedPredicateNode "fuzzy_within"
+//    Handle hOutgoingNode = atomSpace.getOutgoing(hFuzzyWithin, 0);
+//    Handle hGroundedPredicateNode = atomSpace.getOutgoing(hOutgoingNode, 0);
+
+//    bool isNotPredicateNode = atomSpace.getType(hGroundedPredicateNode) != GROUNDED_PREDICATE_NODE;
+//    bool isOutgoingNotPredicateNode = atomSpace.getType(hOutgoingNode) != GROUNDED_PREDICATE_NODE;
+
+//    if ( hGroundedPredicateNode == opencog::Handle::UNDEFINED || (isNotPredicateNode && isOutgoingNotPredicateNode)) {
+
     // Get the GroundedPredicateNode "fuzzy_within"
     Handle hGroundedPredicateNode = atomSpace.getOutgoing(hFuzzyWithin, 0);
 
