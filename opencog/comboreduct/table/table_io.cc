@@ -1034,7 +1034,7 @@ inferTableAttributes(istream& in, const string& target_feature,
  * 1.2) whether it has a header
  * 1.3) whether it is dense or sparse
  *
- * 2) Load the actual data
+ * 2) Load the actual data.
  */
 istream& istreamTable(istream& in, Table& tab,
                       const string& target_feature,
@@ -1177,8 +1177,9 @@ istream& istreamDenseTable(istream& in, Table& tab,
               || (target_feature.empty()
                   && ignore_features.empty()
                   && timestamp_feature.empty()),
-              "then a target feature, ignore features or timestamp_feature "
-              "cannot be specified");
+              "If the data file has no header, "
+              "then a target feature, ignore features or "
+              "timestamp_feature cannot be specified");
 
     // determine target, timestamp and ignore indexes
     int target_idx = 0;    // if no header, target is at the first
@@ -1395,37 +1396,6 @@ ostream& ostreamCTableTime(ostream& out, const CTableTime& ctt)
         ostreamCTableTimeRow(out, tio);
 
     return out;
-}
-
-// ===========================================================
-// subsample stuff
-
-void subsampleTable(ITable& it, OTable& ot, unsigned nsamples)
-{
-    OC_ASSERT(it.size() == ot.size());
-    if(nsamples < ot.size()) {
-        unsigned int nremove = ot.size() - nsamples;
-        dorepeat(nremove) {
-            unsigned int ridx = randGen().randint(ot.size());
-            it.erase(it.begin()+ridx);
-            ot.erase(ot.begin()+ridx);
-        }
-    }
-}
-
-void subsampleTable(Table& table, unsigned nsamples)
-{
-    subsampleTable(table.itable, table.otable, nsamples);
-}
-
-void subsampleTable(ITable& it, unsigned nsamples) {
-    if(nsamples < it.size()) {
-        unsigned int nremove = it.size() - nsamples;
-        dorepeat(nremove) {
-            unsigned int ridx = randGen().randint(it.size());
-            it.erase(it.begin()+ridx);
-        }
-    }
 }
 
 // ===========================================================

@@ -49,8 +49,8 @@ Router::Router()
 {
 
     running = true;
-    // this will force ther router to send AVAILABLE_ELEMENT for all known NE
-    // as soon it starts up...
+    // This will force the router to send AVAILABLE_ELEMENT for all
+    // known NE as soon it starts up...
     lastNotifyTimestamp = 0;
     messageCentral = new MemoryMessageCentral();
 
@@ -681,8 +681,8 @@ bool Router::sendNotification(const NotificationData& data)
         }
 
         logger().debug("Router - sendNotification. "
-                "Received response (after chomp): '%s' bytes: %d",
-                response, receivedBytes );
+                       "Received response (after chomp): '%s' bytes: %d",
+                       response, receivedBytes );
 
         std::string answer = response;
 

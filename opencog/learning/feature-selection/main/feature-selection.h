@@ -50,6 +50,7 @@ struct feature_selection_parameters
         algorithm("simple"), scorer(mi),
         target_size(1), exp_distrib(false), threshold(0.0),
         jobs(1),
+        subsampling_ratio(1.0),
         inc_target_size_epsilon(1.0e-10),
         inc_red_intensity(-1.0),
         inc_interaction_terms(1),
@@ -63,6 +64,7 @@ struct feature_selection_parameters
         hc_crossover_pop_size(300),
         hc_crossover_min_neighbors(1000),
         hc_widen_search(true),
+        hc_fraction_of_nn(2.0),
         mi_confi(50.0)
     {}
 
@@ -79,6 +81,8 @@ struct feature_selection_parameters
     bool exp_distrib;
     double threshold;
     unsigned jobs;
+
+    float subsampling_ratio;
 
     // incremental selection paramters
     double inc_target_size_epsilon;
@@ -103,6 +107,7 @@ struct feature_selection_parameters
     unsigned hc_crossover_pop_size;
     unsigned hc_crossover_min_neighbors;
     bool hc_widen_search;
+    float hc_fraction_of_nn;
 
     // MI scorer parameters
     double mi_confi; //  confidence intensity

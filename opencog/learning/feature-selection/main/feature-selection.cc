@@ -70,6 +70,7 @@ vector<double> score_individual_features(const Table& table,
 {
     typedef set<arity_t> FS;
     CTable ctable = table.compressed();
+
     fs_scorer<FS> fs_sc(ctable, fs_params);
     vector<double> res;
     boost::transform(boost::irange(0, table.get_arity()), back_inserter(res),
@@ -149,6 +150,7 @@ feature_set_pop select_feature_sets(const CTable& ctable,
         op_params.set_min_score_improv(min_score_improv);
         hc_parameters hc_params;
         hc_params.widen_search = fs_params.hc_widen_search;
+        hc_params.fraction_of_nn = fs_params.hc_fraction_of_nn;
         hc_params.single_step = false;
         hc_params.crossover = fs_params.hc_crossover;
         hc_params.crossover_pop_size = fs_params.hc_crossover_pop_size;
@@ -185,6 +187,12 @@ feature_set select_features(const Table& table,
                             const feature_selection_parameters& fs_params)
 {
     CTable ctable = table.compressed();
+    if (fs_params.subsampling_ratio < 1.0) {
+        logger().debug() << "Subsample table (size = "
+                         << ctable.uncompressed_size() << ")";
+        subsampleCTable(fs_params.subsampling_ratio, ctable);
+        logger().debug() << "New size = " << ctable.uncompressed_size();
+    }
     return select_features(ctable, fs_params);
 }
 

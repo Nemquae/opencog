@@ -246,6 +246,14 @@ int main(int argc, char** argv)
          value<time_t>(&fs_params.max_time)->default_value(INT_MAX),
          "Longest allowed runtime, in seconds (ONLY WORKS FOR hc).\n")
 
+        ("subsampling-ratio",
+         value<float>(&fs_params.subsampling_ratio)->default_value(1),
+         "Subsampling size ratio. 1 means no subsampling is taking place. "
+         "0 means is the most extrem subsampling (all data are discarded). "
+         "This is useful to introduce some randomness in "
+         "feature selection, as not all feature selection algorithms "
+         "have some.\n")
+
         // ======= Incremental selection params =======
         (opt_desc_str(inc_redundant_intensity_opt).c_str(),
          value<double>(&fs_params.inc_red_intensity)->default_value(0.1),
@@ -302,6 +310,9 @@ int main(int argc, char** argv)
         ("hc-widen-search",
          value<bool>(&fs_params.hc_widen_search)->default_value(true),
          "Hillclimber widen_search (see moses --help or man moses for more help)\n")
+        ("hc-fraction-of-nn",
+         value<float>(&fs_params.hc_fraction_of_nn)->default_value(2.0),
+         "Hillclimber fraction of neighbors (see moses --help or man moses for more help)\n")
 
         // ======= Stochastic max dependency params =======
         ("smd-top-size",
@@ -339,9 +350,6 @@ int main(int argc, char** argv)
          "(see moses --help or man moses for more info).\n")
 
         ;
-
-    // XXX TODO add an option to set this ... 
-    fs_params.max_time = INT_MAX;
 
     variables_map vm;
     store(parse_command_line(argc, argv, desc), vm);
@@ -422,6 +430,13 @@ int main(int argc, char** argv)
                             fs_params.target_feature_str,
                             fs_params.timestamp_feature_str,
                             fs_params.ignore_features_str);
+
+    logger().debug() << "Table size = " << table.size();
+
+    if (fs_params.subsampling_ratio < 1.0) {
+        subsampleTable(fs_params.subsampling_ratio * table.size(), table);
+        logger().debug() << "Table has been resampled to size = " << table.size();
+    }
 
     type_tree inferred_tt = table.get_signature();
     type_tree output_tt = get_signature_output(inferred_tt);

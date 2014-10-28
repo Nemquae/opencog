@@ -1023,6 +1023,13 @@ CTable::CTable(const Func& func, arity_t arity, int nsamples)
     *this = table.compressed();
 }
 
+/////////////////////
+// Subsample table //
+/////////////////////
+
+// Randomly remove rows so that the new size is ratio * table size
+void subsampleTable(float ratio, Table& table);
+void subsampleCTable(float ratio, CTable& ctable);
 
 ////////////////////////
 // Mutual Information //

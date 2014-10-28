@@ -86,7 +86,7 @@ using namespace opencog::control;
 using namespace opencog;
 
 PAI::PAI(AtomSpace& _atomSpace, ActionPlanSender& _actionSender,
-        AvatarInterface& _avatarInterface, unsigned long nextPlanID) :
+         AvatarInterface& _avatarInterface, unsigned long nextPlanID) :
     atomSpace(_atomSpace), actionSender(_actionSender),
     avatarInterface(_avatarInterface), nextActionPlanId(nextPlanID)
 {
@@ -193,10 +193,8 @@ ActionPlanID PAI::createActionPlan()
         }
     }
 
-    ActionPlan plan(planId, demandName);
-    inProgressActionPlans[planId] = plan;
-    ActionIdMap actionIdMap;
-    planToActionIdsMaps[planId] = actionIdMap;
+    inProgressActionPlans[planId] = ActionPlan(planId, demandName);
+    planToActionIdsMaps[planId] = ActionIdMap();
     return planId;
 }
 
@@ -224,17 +222,19 @@ void PAI::sendActionPlan(ActionPlanID planId) throw (opencog::RuntimeException, 
     }
 }
 
-void PAI::sendExtractedActionFromPlan(ActionPlanID planId, unsigned int actionSeqNum) throw (opencog::RuntimeException, std::bad_exception)
+void PAI::sendExtractedActionFromPlan(ActionPlanID planId,
+                                      unsigned int actionSeqNum)
+    throw (opencog::RuntimeException, std::bad_exception)
 {
     ActionPlanMap::const_iterator it = inProgressActionPlans.find(planId);
 
-	// send the first action in the plan and mark the plan as a pending one.
+	// Send the first action in the plan and mark the plan as a pending one.
     if (it != inProgressActionPlans.end()) {
         const ActionPlan& plan = it->second;
         if (actionSender.sendSpecificActionFromPlan(plan, actionSeqNum)) {
-            // mark action plan as sent by moving it from inProgress to pending map
-            
-            // must be added first. Otherwise the reference to the plan becomes invalid
+            // Mark action plan as sent by moving it from inProgress
+            // to pending map must be added first. Otherwise the
+            // reference to the plan becomes invalid
             pendingActionPlans[planId] = plan;
             inProgressActionPlans.erase(it);
 
@@ -498,7 +498,8 @@ ActionID PAI::addAction(ActionPlanID planId, const AvatarAction& action) throw (
         // Maps the planID + seqNumber to the actionID for further usage.
         planToActionIdsMaps[planId][seqNumber] = result;
     } else {
-        logger().warn("PAI - No action plan with id = %s in progress\n", planId.c_str());
+        logger().warn("PAI - No action plan with id = %s in progress\n",
+                      planId.c_str());
         // TODO: throw an Exception?
     }
     return result;
@@ -836,7 +837,9 @@ void PAI::processAvatarSignal(DOMElement * element)
         XMLString::transcode(NAME_ATTRIBUTE, tag, PAIUtils::MAX_TAG_LENGTH);
         char* name = XMLString::transcode(signal->getAttribute(tag));
 
-        logger().debug("PAI - Got avatar-signal: avatarId = %s (%s), timestamp = %u\n", agentID, internalAgentId.c_str(), tsValue);
+        logger().debug("PAI - Got avatar-signal: "
+                       "avatarId = %s (%s), timestamp = %u\n",
+                       agentID, internalAgentId.c_str(), tsValue);
 
         char* signalName = XMLString::transcode(signal->getTagName());
         if (strcmp(signalName,ACTION_ELEMENT) == 0) {
@@ -850,15 +853,20 @@ void PAI::processAvatarSignal(DOMElement * element)
             // result without parameters, otherwise it is information about an
             // action by itself.
             if (strlen(planIdStr)) {
-                processAgentActionPlanResult(agentID, tsValue, nameStr, planIdStr, signal);
+                processAgentActionPlanResult(agentID, tsValue,
+                                             nameStr, planIdStr, signal);
                 XMLString::release(&planIdStr);
             } else {
                 // getting action instance name attribute value
-                XMLString::transcode(ACTION_INSTANCE_NAME_ATTRIBUTE, tag, PAIUtils::MAX_TAG_LENGTH);
-                char* instanceName = XMLString::transcode(signal->getAttribute(tag));
+                XMLString::transcode(ACTION_INSTANCE_NAME_ATTRIBUTE,
+                                     tag, PAIUtils::MAX_TAG_LENGTH);
+                char* instanceName =
+                    XMLString::transcode(signal->getAttribute(tag));
                 string instanceNameStr(camelCaseToUnderscore(instanceName));
 
-                processAgentActionWithParameters(agentNode, internalAgentId, tsValue, nameStr, instanceNameStr, signal);
+                processAgentActionWithParameters(agentNode, internalAgentId,
+                                                 tsValue, nameStr,
+                                                 instanceNameStr, signal);
                 XMLString::release(&instanceName);
             }
 
@@ -1496,21 +1504,26 @@ void PAI::processAgentActionWithParameters(Handle& agentNode, const string& inte
     actionHandles.push_back(evalLink4);
     //-------------------------------End-------the result state actor of the action-------End--------------------------------------------------
 
-    // add this action to timelink
+    // Add this action to timelink
     Handle atTimeLink = timeServer().addTimeInfo(actionInstanceNode, tsValue);
     AtomSpaceUtil::updateLatestAgentActionDone(atomSpace, atTimeLink, agentNode);
     actionConcernedHandles.push_back(atTimeLink);
 
-    // if this is a statechage action, add the new value of this state into the atomspace
+    // If this is a statechage action, add the new value of this state
+    // into the atomspace
     EVENT_TYPE eventTYpe;
     if (nameStr == "state_change")
     {
         OC_ASSERT(changedStateName != "");
         OC_ASSERT(newStateValNode != Handle::UNDEFINED,
-                "PAI:processAgentActionWithParameters: Got an invalid new state value handle when process a state change action. \n");
+                  "PAI:processAgentActionWithParameters: Got an invalid new "
+                  "state value handle when process a state change action. \n");
         TruthValuePtr tv(SimpleTruthValue::createTV(1.0, 1.0));
 
-        Handle newStateEvalLink = AtomSpaceUtil::addPropertyPredicate(atomSpace, changedStateName, targetNode, newStateValNode,tv,Temporal(tsValue));
+        Handle newStateEvalLink =
+            AtomSpaceUtil::addPropertyPredicate(atomSpace, changedStateName,
+                                                targetNode, newStateValNode,
+                                                tv,Temporal(tsValue));
 
         actionConcernedHandles.push_back(newStateValNode);
         actionConcernedHandles.push_back(newStateEvalLink);
@@ -1568,13 +1581,16 @@ void PAI::processAgentActionPlanResult(char* agentID, unsigned long tsValue, con
         }
     }
 
-    logger().warn("PAI - avatar id %s (%s), name: %s, status: %s, statusCode: %d", agentID, internalAgentId.c_str(), name.c_str(), status, statusCode);
+    logger().debug("PAI - avatar id %s (%s), "
+                   "name: %s, status: %s, statusCode: %d",
+                   agentID, internalAgentId.c_str(),
+                   name.c_str(), status, statusCode);
 
     // This is a feedback for a sent action plan
     XMLString::transcode(SEQUENCE_ATTRIBUTE, tag, PAIUtils::MAX_TAG_LENGTH);
     char* sequenceStr = XMLString::transcode(signal->getAttribute(tag));
 
-    if (planIdStr && strlen(planIdStr) > 0) {
+    if (planIdStr && strlen(planIdStr)) {
         ActionPlanID planId = planIdStr;
 
         unsigned int sequence;
@@ -1587,9 +1603,9 @@ void PAI::processAgentActionPlanResult(char* agentID, unsigned long tsValue, con
 
         setActionPlanStatus(planId, sequence, statusCode, tsValue);
     } else {
-        logger().error(
-                     "PAI - Got a avatar-signal with action '%s' with status (name" 
-            " = '%s'), but no plan-id attribute!", name.c_str(), status);
+        logger().error("PAI - Got a avatar-signal with action '%s' "
+                       "with status (name = '%s'), but no plan-id attribute!",
+                       name.c_str(), status);
     }
     XMLString::release(&sequenceStr);
     XMLString::release(&status);
@@ -2760,18 +2776,20 @@ Handle PAI::addActionToAtomSpace(ActionPlanID planId, const AvatarAction& action
         default: {
             // Should never get here, but...
             throw opencog::RuntimeException(TRACE_INFO,
-                                            "PAI - Undefined map from '%s' action param type to Atom representation.",
+                                            "PAI - Undefined map from '%s' "
+                                            "action param type to Atom "
+                                            "representation.",
                                             param.getType().getName().c_str());
             break;
         }
         }
     }
-    Handle schemaListLink = AtomSpaceUtil::addLink(atomSpace, LIST_LINK, schemaListLinkOutgoing);
+    Handle schemaListLink = AtomSpaceUtil::addLink(atomSpace, LIST_LINK,
+                                                   schemaListLinkOutgoing);
 
-    HandleSeq execLinkOutgoing;
-    execLinkOutgoing.push_back(schemaNode);
-    execLinkOutgoing.push_back(schemaListLink);
-    Handle execLink = AtomSpaceUtil::addLink(atomSpace, EXECUTION_LINK, execLinkOutgoing);
+    HandleSeq execLinkOutgoing = {schemaNode, schemaListLink};
+    Handle execLink = AtomSpaceUtil::addLink(atomSpace, EXECUTION_LINK,
+                                             execLinkOutgoing);
 
     return execLink;
 }
@@ -2783,17 +2801,20 @@ Handle PAI::addActionPredicate(const char* predicateName, const AvatarAction& ac
 
     HandleSeq predicateListLinkOutgoing;
     predicateListLinkOutgoing.push_back(execLink);
-    Handle predicateListLink = AtomSpaceUtil::addLink(atomSpace, LIST_LINK, predicateListLinkOutgoing);
+    Handle predicateListLink = AtomSpaceUtil::addLink(atomSpace, LIST_LINK,
+                                                      predicateListLinkOutgoing);
 
-    Handle predicateNode = AtomSpaceUtil::addNode(atomSpace, PREDICATE_NODE, predicateName);
+    Handle predicateNode = AtomSpaceUtil::addNode(atomSpace, PREDICATE_NODE,
+                                                  predicateName);
 
-    HandleSeq evalLinkOutgoing;
-    evalLinkOutgoing.push_back(predicateNode);
-    evalLinkOutgoing.push_back(predicateListLink);
-    Handle evalLink = AtomSpaceUtil::addLink(atomSpace, EVALUATION_LINK, evalLinkOutgoing);
+    HandleSeq evalLinkOutgoing = {predicateNode, predicateListLink};
+    Handle evalLink = AtomSpaceUtil::addLink(atomSpace, EVALUATION_LINK,
+                                             evalLinkOutgoing);
 
-    Handle atTimeLink = timeServer().addTimeInfo(evalLink, timestamp, TruthValue::TRUE_TV());
-    AtomSpaceUtil::updateLatestAvatarActionPredicate(atomSpace, atTimeLink, predicateNode);
+    Handle atTimeLink = timeServer().addTimeInfo(evalLink, timestamp,
+                                                 TruthValue::TRUE_TV());
+    AtomSpaceUtil::updateLatestAvatarActionPredicate(atomSpace, atTimeLink,
+                                                     predicateNode);
 
     return atTimeLink;
 }
@@ -3336,8 +3357,8 @@ void PAI::setPendingActionPlansFailed()
 void PAI::setActionPlanStatus(ActionPlanID& planId, unsigned int sequence,
                               ActionStatus statusCode, unsigned long timestamp)
 {
-    // Get the corresponding actions from pending map and add the given perceptions
-    // into AtomSpace
+    // Get the corresponding actions from pending map and add the
+    // given perceptions into AtomSpace
     ActionPlanMap::iterator it = pendingActionPlans.find(planId);
     if (it != pendingActionPlans.end()) {
         ActionPlan& plan = it->second;
@@ -3348,7 +3369,7 @@ void PAI::setActionPlanStatus(ActionPlanID& planId, unsigned int sequence,
             // TODO: Check for string->int conversion failures
 
         } else {
-            // this statusCode is for all actions in the action plan
+            // This statusCode is for all actions in the action plan
             // that were not marked as done or failed yet
             for (unsigned int i = 1; i <= plan.size(); i++) {
                 if (!plan.isDone(i) && !plan.isFailed(i)) {
@@ -3404,10 +3425,12 @@ void PAI::setActionPlanStatus(ActionPlanID& planId, unsigned int sequence,
                 break;
             }
             ActionID actionHandle = planToActionIdsMaps[planId][seqNumber];
-            //printf("calling addActionPredicate for action with seqNumber = %u\n", seqNumber);
-            //! @todo
-            assert(atomSpace.isValidHandle(actionHandle));
-            addActionPredicate(predicateName, plan.getAction(seqNumber), timestamp, actionHandle);
+            OC_ASSERT(atomSpace.isValidHandle(actionHandle),
+                      "No valid action handle associated with "
+                      "planId = %s, seqNumber = %u",
+                      planId.c_str(), seqNumber);
+            addActionPredicate(predicateName, plan.getAction(seqNumber),
+                               timestamp, actionHandle);
         }
 
         // If there is no pending actions anymore
@@ -3428,9 +3451,8 @@ void PAI::setActionPlanStatus(ActionPlanID& planId, unsigned int sequence,
 		} 
 
     } else {
-        logger().warn(
-                     "PAI - No pending action plan with the given id '%s'.",
-                     planId.c_str());
+        logger().warn("PAI - No pending action plan with the given id '%s'.",
+                      planId.c_str());
     }
 }
 

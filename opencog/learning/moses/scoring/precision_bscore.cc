@@ -114,22 +114,24 @@ precision_bscore::precision_bscore(const CTable& ctable_,
                                    float activation_pressure_,
                                    float min_activation_,
                                    float max_activation_,
+                                   bool positive_,
                                    float dispersion_pressure,
                                    float dispersion_exponent,
                                    bool exact_experts_,
                                    double bias_scale_,
-                                   bool positive_,
                                    bool time_bscore_,
-                                   TemporalGranularity granularity)
+                                   TemporalGranularity granularity,
+                                   bool disable_debug_log)
     : bscore_ctable_time_dispersion(ctable_, dispersion_pressure,
                                     dispersion_exponent, granularity),
     min_activation(bound(min_activation_, 0.0f, 1.0f)),
     max_activation(bound(max_activation_, 0.0f, 1.0f)),
     activation_pressure(activation_pressure_),
+    positive(positive_),
     bias_scale(bias_scale_),
     exact_experts(exact_experts_),
-    positive(positive_),
-    time_bscore(time_bscore_)
+    time_bscore(time_bscore_),
+    _disable_debug_log(disable_debug_log)
 {
     reset_weights();
 
@@ -139,25 +141,30 @@ precision_bscore::precision_bscore(const CTable& ctable_,
 
     output_type = _wrk_ctable.get_output_type();
     OC_ASSERT(output_type == id::boolean_type,
-        "Error: Precision scorer: output type must be boolean!");
+              "Error: Precision scorer: output type must be boolean!");
 
-    logger().fine("Precision scorer, "
-                  "total table weight = %f, "
-                  "activation_pressure = %f, "
-                  "min_activation = %f, "
-                  "max_activation = %f, "
-                  "dispersion_pressure = %f",
-                  _ctable_weight,
-                  activation_pressure, min_activation, max_activation,
-                  dispersion_pressure);
+    if (logger().getLevel() != Logger::DEBUG or !_disable_debug_log) {
+        logger().debug("Precision scorer, "
+                       "total table weight = %f, "
+                       "activation_pressure = %f, "
+                       "min_activation = %f, "
+                       "max_activation = %f, "
+                       "dispersion_pressure = %f",
+                       _ctable_weight,
+                       activation_pressure, min_activation, max_activation,
+                       dispersion_pressure);
+    }
 
     // Verify that the activation parameters are sane
-    OC_ASSERT((0.0 < activation_pressure) && (0.0 < min_activation)
-              && (min_activation <= max_activation),
-              "Precision scorer, invalid activation bounds.  "
-              "The activation pressure must be non-zero, the minimum activation must be "
-              "greater than zero, and the maximum activation must be greater "
-              "than or equal to the minimum activation.\n");
+    OC_ASSERT(0.0 <= activation_pressure,
+              "activation pressure must be non-negative");
+    if (0.0 < activation_pressure) {
+        OC_ASSERT((0.0 < min_activation) && (min_activation <= max_activation),
+                  "Precision scorer, invalid activation bounds.  "
+                  "The minimum activation must be greater than zero, "
+                  "and the maximum activation must be greater "
+                  "than or equal to the minimum activation.\n");
+    }
 }
 
 /// For boolean tables, sum the total number of 'T' values
@@ -587,10 +594,12 @@ behavioral_score precision_bscore::best_possible_bscore() const
             break;
     }
 
-    logger().debug("Precision scorer, best score = %f", best_sc);
-    logger().debug("precision at best score = %f", best_precision);
-    logger().debug("activation at best score = %f", best_activation);
-    logger().debug("activation penalty at best score = %f", best_activation_penalty);
+    if (logger().getLevel() != Logger::DEBUG or !_disable_debug_log) {
+        logger().debug("Precision scorer, best score = %f", best_sc);
+        logger().debug("precision at best score = %f", best_precision);
+        logger().debug("activation at best score = %f", best_activation);
+        logger().debug("activation penalty at best score = %f", best_activation_penalty);
+    }
 
     // @todo it's not really the best bscore but rather the best score
     // That's because there are potentially many bscores that are the
@@ -611,15 +620,19 @@ behavioral_score precision_bscore::worst_possible_bscore() const
 // -inf if activation is 0.0 -- but that's OK, it won't hurt anything.
 score_t precision_bscore::get_activation_penalty(score_t activation) const
 {
-    score_t dst = 0.0;
-    if (activation < min_activation)
-        dst = 1.0 - activation / min_activation;
+    if (activation_pressure > 0) {
+        score_t dst = 0.0;
+        if (activation < min_activation)
+            dst = 1.0 - activation / min_activation;
 
-    if (max_activation < activation)
-        dst = (activation - max_activation) / (1.0 - max_activation);
+        if (max_activation < activation)
+            dst = (activation - max_activation) / (1.0 - max_activation);
 
-    // logger().fine("activation penalty = %f", dst);
-    return activation_pressure * log(1.0 - dst);
+        // logger().fine("activation penalty = %f", dst);
+        return activation_pressure * log(1.0 - dst);
+    } else {
+        return 0.0;
+    }
 }
 
 score_t precision_bscore::min_improv() const

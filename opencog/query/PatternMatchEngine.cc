@@ -123,7 +123,9 @@ bool PatternMatchEngine::tree_compare(Handle hp, Handle hg)
 		LinkPtr lp(LinkCast(hp));
 		if (1 != lp->getArity())
 			throw InvalidParamException(TRACE_INFO, "QuoteLink has unexpected arity!");
+		more_depth ++;
 		bool misma = tree_compare(lp->getOutgoingAtom(0), hg);
+		more_depth --;
 		in_quote = false;
 		return misma;
 	}
@@ -165,27 +167,53 @@ bool PatternMatchEngine::tree_compare(Handle hp, Handle hg)
 	}
 
 	// If they're the same atom, then clearly they match.
-	// ... but only if hg is not a subclause of the current clause.
-	if ((hp == hg) and (hg != curr_pred_handle))
+	// ... but only hp is a constant i.e. contains no bound variables)
+	if (hp == hg)
 	{
-		// Bound, quoted variables cannot be solutions to themselves.
-		if (not in_quote or
-		    (in_quote and
-		     (VARIABLE_NODE != tp or
-		       _bound_vars.end() == _bound_vars.find(hp))))
+		if (hg == curr_pred_handle)
 		{
-			var_grounding[hp] = hg;
+			if (any_node_in_tree(hg, _bound_vars)) return true;
 		}
-		return false;
+		else
+		{
+			// Bound, quoted variables cannot be solutions to themselves.
+			if (not in_quote or
+			    (in_quote and
+			     (VARIABLE_NODE != tp or
+			       _bound_vars.end() == _bound_vars.find(hp))))
+			{
+				var_grounding[hp] = hg;
+			}
+			return false;
+		}
 	}
 
 	// If both are links, compare them as such.
 	// Unless pattern link is a QuoteLink, in which case, the quoted
-	// contents is compared.
+	// contents is compared. (well, that was done up above...)
 	LinkPtr lp(LinkCast(hp));
 	LinkPtr lg(LinkCast(hg));
 	if (lp and lg)
 	{
+		// The proposed grounding must NOT contain any bound variables!
+		// .. unless they are quoted in the pattern, in which case they
+		// are allow. The below checks this case. The check is not entirely
+		// correct though; there ar some weird corner cses what a variable
+		// may appear quoted in the pattern, but be in the wrong spot
+		// entirely in the proposed grounding, and so should not be allowed.
+		// For now, we punt on this... a proper fix would be .. hard.
+		if (any_node_in_tree(hg, _bound_vars))
+		{
+			for (Handle vh: _bound_vars)
+			{
+				if (is_node_in_tree(hg, vh))
+				{
+					if (is_quoted_in_tree(hp, vh)) continue;
+					return true;
+				}
+			}
+		}
+
 		// Let the callback perform basic checking.
 		bool mismatch = pmc->link_match(lp, lg);
 		if (mismatch) return true;
@@ -196,9 +224,9 @@ bool PatternMatchEngine::tree_compare(Handle hp, Handle hg)
 
 		// If the two links are both ordered, its enough to compare
 		// them "side-by-side"; the foreach_atom_pair iterator does
-		// this. If they are un-ordered, then we have to compare (at
-		// most) every possible permutation.
-		//
+		// this. If they are un-ordered, then we have to compare every
+		// possible permutation.  This can be a bit of a combinatoric
+		// explosion.
 		if (classserver().isA(tp, ORDERED_LINK))
 		{
 			LinkPtr lp(LinkCast(hp));
@@ -220,9 +248,11 @@ bool PatternMatchEngine::tree_compare(Handle hp, Handle hg)
 			//
 			// var_solutn_stack.push(var_grounding);
 			depth ++;
+			more_depth ++;
 
 			mismatch = foreach_atom_pair(osp, osg,
 			                   &PatternMatchEngine::tree_compare, this);
+			more_depth --;
 			depth --;
 			dbgprt("tree_comp down link mismatch=%d\n", mismatch);
 
@@ -240,33 +270,57 @@ bool PatternMatchEngine::tree_compare(Handle hp, Handle hg)
 		}
 		else
 		{
+			// If we are here, we are dealing with an unordered link.
 			// Enumerate all the permutations of the outgoing set of
-			// the predicate.  We keep trying different permuations
-			// until we find one that works, and just return that, and
-			// ignore the rest.  We have to push/pop the stack as we try
-			// each permutation, so that each permutation has a chance
-			// of finding a grounding.
+			// the predicate.  We have to try all possible permuations
+			// here, as different variable assignments could lead to
+			// very differrent problem solutions.  We have to push/pop
+			// the stack as we try each permutation, so that each
+			// permutation has a chance of finding a grounding.
 			//
-			// We don't try all possible groundings; this is not the place
-			// to do this; this is done elsewhere. Here, its enough to find
-			// any grounding that works (i.e. is consistent with all
-			// groundings up till now).
+			// The problem with exhaustive enumeration is that we can't
+			// do it here, by ourselves: this can only be done at the
+			// clause level. So if we do find a grounding, we have to
+			// report it, and return.  We might get called again, and,
+			// if so, we have to pick up where we left off, and so there
+			// is yet more stack trickery to save and restore that state.
+			//
 			LinkPtr lp(LinkCast(hp));
 			LinkPtr lg(LinkCast(hg));
-			std::vector<Handle> osp = lp->getOutgoingSet();
 			const std::vector<Handle> &osg = lg->getOutgoingSet();
-			sort(osp.begin(), osp.end());
+			std::vector<Handle> mutation;
+
+			if (more_stack.size() <= more_depth) more_stack.push_back(false);
+			if (more_stack[more_depth])
+			{
+				dbgprt("tree_comp resume unordered link at depth %zd\n",
+				       more_depth);
+				mutation = mute_stack.top();
+				mute_stack.pop();
+			}
+			else
+			{
+				dbgprt("tree_comp fresh unordered link at depth %zd\n",
+				       more_depth);
+				mutation = lp->getOutgoingSet();
+				sort(mutation.begin(), mutation.end());
+			}
 
 			do {
 				// The recursion step: traverse down the tree.
-				dbgprt("tree_comp begin down unordered link\n");
+				dbgprt("tree_comp start downwards unordered link at depth=%lu\n",
+				       more_depth);
 				var_solutn_stack.push(var_grounding);
 				depth ++;
 
-				mismatch = foreach_atom_pair(osp, osg,
+				have_more = false;
+				more_depth ++;
+				mismatch = foreach_atom_pair(mutation, osg,
 				                   &PatternMatchEngine::tree_compare, this);
+				more_depth --;
 				depth --;
-				dbgprt("tree_comp down unordered link mismatch=%d\n", mismatch);
+				dbgprt("tree_comp down unordered link depth=%lu mismatch=%d\n",
+				       more_depth, mismatch);
 
 				// If we've found a grounding, lets see if the
 				// post-match callback likes this grounding.
@@ -280,14 +334,46 @@ bool PatternMatchEngine::tree_compare(Handle hp, Handle hg)
 				{
 					var_solutn_stack.pop();
 					var_grounding[hp] = hg;
+					dbgprt("tree_comp unordered link have gnd at depth=%lu\n",
+					      more_depth);
+
+					// If a lower part of a tree has more to do, it will have
+					// set the have_more flag.  If it is done, then the
+					// have_more flag is clear.  If its clear, we, have to
+					// advance, so we don't restart in the same place.
+					// Ugh. Seems like there should be a more elegant way.
+					if (have_more)
+					{
+						mute_stack.push(mutation);
+						more_stack[more_depth] = true;
+						have_more = true;
+					}
+					else
+					{
+						// Lower loop is done. Advance.
+						bool more_perms = std::next_permutation(mutation.begin(), mutation.end());
+						if (more_perms)
+						{
+							mute_stack.push(mutation);
+							more_stack[more_depth] = true;
+							have_more = true;
+						}
+						else
+						{
+							more_stack[more_depth] = false;
+							have_more = false;
+						}
+					}
+
 					return false;
 				}
-
 				POPGND(var_grounding, var_solutn_stack);
-			} while (next_permutation(osp.begin(), osp.end()));
+			} while (std::next_permutation(mutation.begin(), mutation.end()));
 
 			dbgprt("tree_comp down unordered exhausted all permuations\n");
-			return mismatch;
+			more_stack[more_depth] = false;
+			have_more = false;
+			return true;
 		}
 
 		return mismatch;
@@ -317,193 +403,224 @@ bool PatternMatchEngine::tree_compare(Handle hp, Handle hg)
 
 /* ======================================================== */
 
+/// Return true if a grounding was found.
 bool PatternMatchEngine::soln_up(Handle hsoln)
 {
-	var_solutn_stack.push(var_grounding);
-	bool found = do_soln_up(hsoln);
-	if (found)
-	{
-		var_solutn_stack.pop();  // pop entry created, but keep current.
-	}
-	else
-	{
-		POPGND(var_grounding, var_solutn_stack);
-	}
+	// Let's not stare at our own navel.
+	if (hsoln == curr_root) return false;
 
-	return found;
+	have_more = false;
+	more_depth = 0;
+	more_stack.resize(1);
+	more_stack[0] = false;
+	bool did_find = false;
+	do {
+		var_solutn_stack.push(var_grounding);
+		bool no_match = tree_compare(curr_pred_handle, hsoln);
+		// If no match, then try the next one.
+		if (no_match)
+		{
+			// Get rid of any grounding that might have been proposed
+			// during the tree-match.
+			POPGND(var_grounding, var_solutn_stack);
+			return false;
+		}
+
+		bool found = do_soln_up(hsoln);
+		did_find |= found;
+		if (found)
+		{
+			// pop the entry we created, but do keep the grounding
+			// that was found.
+			var_solutn_stack.pop();
+		}
+		else
+		{
+			// Get rid of any grounding that might have been propsed
+			// during the tree-match.
+			POPGND(var_grounding, var_solutn_stack);
+		}
+
+		if (have_more) { dbgprt("Wait ----- there's more!\n"); }
+	} while (have_more);
+
+	return did_find;
 }
 
+/// Return true if a grounding was found.
 bool PatternMatchEngine::do_soln_up(Handle& hsoln)
 {
-	// Let's not look at our own navel
-	if (hsoln == curr_root) return false;
 	depth = 1;
 
-	bool no_match = tree_compare(curr_pred_handle, hsoln);
-
-	// If no match, then try the next one.
-	if (no_match) return false;
-
-	// If we've navigated to the top of the clause, and its matched,
-	// then it is fully grounded, and we're done with it.
-	// Start work on the next unsovled predicate. But do all of this
-	// only if the callback allows it.
-	if (curr_pred_handle == curr_root)
+	// If we are here, then everything below us matches.  If we are
+	// not yet at the top of a clause, i.e. we are in the middle of
+	// a clause, then we need to move up.
+	if (curr_pred_handle != curr_root)
 	{
-		// Is this required to match? If so, then let the callback
-		// make the final decision; if callback rejects, then it's
-		// the same as a mismatch; try the next one.
-		if (_optionals.count(curr_root))
-		{
-			clause_accepted = true;
-			no_match = pmc->optional_clause_match(curr_pred_handle, hsoln);
-		}
-		else
-		{
-			no_match = pmc->clause_match(curr_pred_handle, hsoln);
-		}
-		dbgprt("clause match callback no_match=%d\n", no_match);
-		if (no_match) return false;
-
-		curr_soln_handle = hsoln;
-		clause_grounding[curr_root] = curr_soln_handle;
-		prtmsg("---------------------\nclause:", curr_root);
-		prtmsg("ground:", curr_soln_handle);
-		dbgprt("--- That's it, now push and do the next one.\n\n");
-
-		root_handle_stack.push(curr_root);
-		pred_handle_stack.push(curr_pred_handle);
 		soln_handle_stack.push(curr_soln_handle);
-		pred_solutn_stack.push(clause_grounding);
-		var_solutn_stack.push(var_grounding);
-		issued_stack.push(issued);
-		in_quote_stack.push(in_quote);
-		pmc->push();
+		curr_soln_handle = hsoln;
 
-		get_next_untried_clause();
-
-		// If there are no further predicates to solve,
-		// we are really done! Report the solution via callback.
+		// Move up the predicate, and hunt for a match, again.
+		prtmsg("node has grnd, move up:", hsoln);
+		// IncomingSet iset = get_incoming_set(curr_pred_handle);
+		IncomingSet iset = curr_pred_handle->getIncomingSet();
+		size_t sz = iset.size();
 		bool found = false;
-		if (Handle::UNDEFINED == curr_root)
-		{
-#ifdef DEBUG
-			dbgprt ("==================== FINITO!\n");
-			print_solution(var_grounding, clause_grounding);
-#endif
-			found = pmc->grounding(var_grounding, clause_grounding);
+		for (size_t i = 0; i < sz; i++) {
+			found = pred_up(Handle(iset[i]));
+			if (found) break;
 		}
-		else
-		{
-			prtmsg("next clause is", curr_root);
-			dbgprt("This clause is %s\n", _optionals.count(curr_root)? "optional" : "required");
-			prtmsg("joining handle is", curr_pred_handle);
-
-			// Else, start solving the next unsolved clause. Note: this is
-			// a recursive call, and not a loop. Recursion is halted when
-			// the next unsolved clause has no grounding.
-			//
-			// We continue our search at the atom that "joins" (is shared
-			// in common) between the previous (solved) clause, and this
-			// clause. If the "join" was a variable, look up its grounding;
-			// else the join is a 'real' atom.
-
-			clause_accepted = false;
-			curr_soln_handle = var_grounding[curr_pred_handle];
-			found = soln_up(curr_soln_handle);
-
-			// If we are here, and found is false, then we've exhausted all
-			// of the search possibilities for the current clause. If this
-			// is an optional clause, and no solutions were reported for it,
-			// then report the failure of finding a solution now. If this was
-			// also the final optional clause, then in fact, we've got a
-			// grounding for the whole thing ... report that!
-			//
-			// Note that lack of a match halts recursion; thus, we can't
-			// depend on recursion to find additional unmatched optional
-			// clauses; thus we have to explicitly loop over all optional
-			// clauses that don't have matches.
-			while ((false == found) &&
-			       (false == clause_accepted) &&
-			       (_optionals.count(curr_root)))
-			{
-				Handle undef(Handle::UNDEFINED);
-				no_match = pmc->optional_clause_match(curr_pred_handle, undef);
-				dbgprt ("Exhausted search for optional clause, cb=%d\n", no_match);
-				if (no_match) return false;
-
-				// XXX Maybe should push n pop here? No, maybe not ...
-				clause_grounding[curr_root] = Handle::UNDEFINED;
-				get_next_untried_clause();
-				prtmsg("Next optional clause is", curr_root);
-				if (Handle::UNDEFINED == curr_root)
-				{
-					dbgprt ("==================== FINITO BANDITO!\n");
-#ifdef DEBUG
-					print_solution(var_grounding, clause_grounding);
-#endif
-					found = pmc->grounding(var_grounding, clause_grounding);
-				}
-				else
-				{
-					// Now see if this optional clause has any solutions,
-					// or not. If it does, we'll recurse. If it does not,
-					// we'll loop around back to here again.
-					clause_accepted = false;
-					curr_soln_handle = var_grounding[curr_pred_handle];
-					found = soln_up(curr_soln_handle);
-				}
-			}
-		}
-
-		// If we failed to find anything at this level, we need to
-		// backtrack, i.e. pop the stack, and begin a search for
-		// other possible matches and groundings.
-		pmc->pop();
-		curr_root = root_handle_stack.top();
-		root_handle_stack.pop();
-
-		curr_pred_handle = pred_handle_stack.top();
-		pred_handle_stack.pop();
+		dbgprt("after moving up the clause, found = %d\n", found);
 
 		curr_soln_handle = soln_handle_stack.top();
 		soln_handle_stack.pop();
 
-		// The grounding stacks are handled differently.
-		POPGND(clause_grounding, pred_solutn_stack);
-		POPGND(var_grounding, var_solutn_stack);
-
-		issued = issued_stack.top();
-		issued_stack.pop();
-
-		in_quote = in_quote_stack.top();
-		in_quote_stack.pop();
-
-		prtmsg("pop to joiner", curr_pred_handle);
-		prtmsg("pop to clause", curr_root);
-
 		return found;
 	}
 
-	// If we are here, then we are somewhere in the middle of a clause,
-	// and everything below us matches. So need to move up.
-	soln_handle_stack.push(curr_soln_handle);
-	curr_soln_handle = hsoln;
+	// If we are here, we've navigated to the top of the clause, and
+	// it is matched, then it is fully grounded, and we're done with it.
+	// Start work on the next unsovled predicate. But first, see what
+	// the callbacks have to say.
 
-	// Move up the predicate, and hunt for a match, again.
-	prtmsg("node has grnd, move up:", hsoln);
-	// IncomingSet iset = get_incoming_set(curr_pred_handle);
-	IncomingSet iset = curr_pred_handle->getIncomingSet();
-	size_t sz = iset.size();
-	bool found = false;
-	for (size_t i = 0; i < sz; i++) {
-		found = pred_up(Handle(iset[i]));
-		if (found) break;
+	// Is this clause a required clause? If so, then let the callback
+	// make the final decision; if callback rejects, then it's the
+	// same as a mismatch; try the next one.
+	bool no_match;
+	if (_optionals.count(curr_root))
+	{
+		clause_accepted = true;
+		no_match = pmc->optional_clause_match(curr_pred_handle, hsoln);
 	}
-	dbgprt("after moving up the clause, found = %d\n", found);
+	else
+	{
+		no_match = pmc->clause_match(curr_pred_handle, hsoln);
+	}
+	dbgprt("clause match callback no_match=%d\n", no_match);
+	if (no_match) return false;
+
+	curr_soln_handle = hsoln;
+	clause_grounding[curr_root] = curr_soln_handle;
+	stack_depth++;
+	prtmsg("---------------------\nclause:", curr_root);
+	prtmsg("ground:", curr_soln_handle);
+	dbgprt("--- That's it, now push to stack depth=%d\n\n", stack_depth);
+
+	root_handle_stack.push(curr_root);
+	pred_handle_stack.push(curr_pred_handle);
+	soln_handle_stack.push(curr_soln_handle);
+	pred_solutn_stack.push(clause_grounding);
+	var_solutn_stack.push(var_grounding);
+	issued_stack.push(issued);
+	in_quote_stack.push(in_quote);
+	pmc->push();
+
+	get_next_untried_clause();
+
+	// If there are no further predicates to solve,
+	// we are really done! Report the solution via callback.
+	bool found = false;
+	if (Handle::UNDEFINED == curr_root)
+	{
+#ifdef DEBUG
+		dbgprt ("==================== FINITO!\n");
+		print_solution(var_grounding, clause_grounding);
+#endif
+		found = pmc->grounding(var_grounding, clause_grounding);
+	}
+	else
+	{
+		prtmsg("next clause is", curr_root);
+		dbgprt("This clause is %s\n", _optionals.count(curr_root)? "optional" : "required");
+		prtmsg("joining handle is", curr_pred_handle);
+		prtmsg("join grounding is", var_grounding[curr_pred_handle]);
+
+		// Else, start solving the next unsolved clause. Note: this is
+		// a recursive call, and not a loop. Recursion is halted when
+		// the next unsolved clause has no grounding.
+		//
+		// We continue our search at the atom that "joins" (is shared
+		// in common) between the previous (solved) clause, and this
+		// clause. If the "join" was a variable, look up its grounding;
+		// else the join is a 'real' atom.
+
+		clause_accepted = false;
+		curr_soln_handle = var_grounding[curr_pred_handle];
+		OC_ASSERT(curr_soln_handle != Handle::UNDEFINED,
+			"Error: joining handle has not been grounded yet!");
+		found = soln_up(curr_soln_handle);
+
+		// If we are here, and found is false, then we've exhausted all
+		// of the search possibilities for the current clause. If this
+		// is an optional clause, and no solutions were reported for it,
+		// then report the failure of finding a solution now. If this was
+		// also the final optional clause, then in fact, we've got a
+		// grounding for the whole thing ... report that!
+		//
+		// Note that lack of a match halts recursion; thus, we can't
+		// depend on recursion to find additional unmatched optional
+		// clauses; thus we have to explicitly loop over all optional
+		// clauses that don't have matches.
+		while ((false == found) and
+		       (false == clause_accepted) and
+		       (_optionals.count(curr_root)))
+		{
+			Handle undef(Handle::UNDEFINED);
+			no_match = pmc->optional_clause_match(curr_pred_handle, undef);
+			dbgprt ("Exhausted search for optional clause, cb=%d\n", no_match);
+			if (no_match) return false;
+
+			// XXX Maybe should push n pop here? No, maybe not ...
+			clause_grounding[curr_root] = Handle::UNDEFINED;
+			get_next_untried_clause();
+			prtmsg("Next optional clause is", curr_root);
+			if (Handle::UNDEFINED == curr_root)
+			{
+				dbgprt ("==================== FINITO BANDITO!\n");
+#ifdef DEBUG
+				print_solution(var_grounding, clause_grounding);
+#endif
+				found = pmc->grounding(var_grounding, clause_grounding);
+			}
+			else
+			{
+				// Now see if this optional clause has any solutions,
+				// or not. If it does, we'll recurse. If it does not,
+				// we'll loop around back to here again.
+				clause_accepted = false;
+				curr_soln_handle = var_grounding[curr_pred_handle];
+				found = soln_up(curr_soln_handle);
+			}
+		}
+	}
+
+	// If we failed to find anything at this level, we need to
+	// backtrack, i.e. pop the stack, and begin a search for
+	// other possible matches and groundings.
+	pmc->pop();
+	curr_root = root_handle_stack.top();
+	root_handle_stack.pop();
+
+	curr_pred_handle = pred_handle_stack.top();
+	pred_handle_stack.pop();
 
 	curr_soln_handle = soln_handle_stack.top();
 	soln_handle_stack.pop();
+
+	// The grounding stacks are handled differently.
+	POPGND(clause_grounding, pred_solutn_stack);
+	POPGND(var_grounding, var_solutn_stack);
+
+	issued = issued_stack.top();
+	issued_stack.pop();
+
+	in_quote = in_quote_stack.top();
+	in_quote_stack.pop();
+	stack_depth --;
+
+	dbgprt("pop to depth %d\n", stack_depth);
+	prtmsg("pop to joiner", curr_pred_handle);
+	prtmsg("pop to clause", curr_root);
 
 	return found;
 }
@@ -540,8 +657,40 @@ bool PatternMatchEngine::pred_up(Handle h)
  * grounded, and as-yet-ungrounded clauses may be in this set.  The
  * sole reason of this set is to avoid infinite resursion, i.e. of
  * re-identifying the same clause over and over as unsolved.
+ *
+ * The words "solved" and "grounded" are used as synonyms throught the
+ * code.
  */
 void PatternMatchEngine::get_next_untried_clause(void)
+{
+	// First, try to ground all the mandatory clauses, only.
+	// Optional clauses are grounded only after all teh mandatory
+	// ones are done.
+	if (get_next_untried_helper(false)) return;
+
+	// If there are no optional clauses, we are done.
+	if (0 == _optionals.size())
+	{
+		// There are no more ungrounded clauses to consider. We are done.
+		curr_root = Handle::UNDEFINED;
+		curr_pred_handle = Handle::UNDEFINED;
+		return;
+	}
+
+	// Try again, this time, considering the optional clauses.
+	if (get_next_untried_helper(true)) return;
+
+	// If we are here, there are no more unsolved clauses to consider.
+	curr_root = Handle::UNDEFINED;
+	curr_pred_handle = Handle::UNDEFINED;
+}
+
+/// Same as above, but with a boolean flag:  if not set, then only the
+/// list of mandatory clauses is considered, else all clauses (mandatory
+/// and optional) are considered.
+///
+/// Return true if we found the next ungrounded clause.
+bool PatternMatchEngine::get_next_untried_helper(bool search_optionals)
 {
 	// Search for an as-yet ungrounded clause. Search for required
 	// clauses first; then, only if none of those are left, move on
@@ -563,6 +712,19 @@ void PatternMatchEngine::get_next_untried_clause(void)
 		unsolved = false;
 		solved = false;
 
+		// Pursue will become the joining atom, that is shared in common
+		// with the a full grounded clause, and an as-yet ungrounded
+		// clause. We need it to be grounded as well, as otherwise the
+		// join will fail.  This can happen when a clause is "fully"
+		// grounded, but the grounding contains a subtree that has a
+		// variable in it that has not yet been grounded.  This is
+		// a rather pathological situation (i.e. grounding a clause with
+		// another clause that has bound variables in it), and it will
+		// probably be rejected at some point.  But, for now, this is a
+		// semi-plausible situation.  So we skip this joiner, and look 
+		// for another.
+		if (Handle::UNDEFINED == var_grounding[pursue]) continue;
+
 		std::vector<Handle>::iterator i = rl->begin();
 		std::vector<Handle>::iterator iend = rl->end();
 		for (; i != iend; i++)
@@ -572,12 +734,14 @@ void PatternMatchEngine::get_next_untried_clause(void)
 			{
 				solved = true;
 			}
-			else if ((issued.end() == issued.find(root)) &&
-			         (_optionals.end() == _optionals.find(root)))
+			else if ((issued.end() == issued.find(root)) and
+			         (search_optionals or 
+			          (_optionals.end() == _optionals.find(root))))
 			{
 				unsolved_clause = root;
 				unsolved = true;
 			}
+			if (solved and unsolved) break;
 		}
 
 		// XXX TODO ... Rather than settling for the first one that we find,
@@ -595,78 +759,26 @@ void PatternMatchEngine::get_next_untried_clause(void)
 		// If there are two ungrounded variables in a clause, then the
 		// "thickness" is the *product* of the sizes of the two incoming
 		// sets. Thus, the fewer ungrounded variables, the better.
-		if (solved && unsolved) break;
+		if (solved and unsolved) break;
 	}
 
-	if (solved && unsolved)
+	if (solved and unsolved)
 	{
-		// Pursue is a pointer to a node that's shared between
-		// several clauses. One of the predicates has been
-		// solved, another has not.  We want to now traverse
-		// upwards from this node, to find the top of the
-		// unsolved clause.
+		// Pursue is a pointer to a (variable) node that's shared between
+		// several clauses. One of the predicates has been grounded,
+		// another has not.  We want to now traverse upwards from this node,
+		// to find the top of the ungrounded clause.
 		curr_root = unsolved_clause;
 		curr_pred_handle = pursue;
 
 		if (Handle::UNDEFINED != unsolved_clause)
 		{
 			issued.insert(unsolved_clause);
-			return;
+			return true;
 		}
 	}
 
-	unsolved = false;
-	solved = false;
-
-	// Try again, this time, considering the optional clauses.
-	for (k = _root_map.begin(); k != _root_map.end(); k++)
-	{
-		RootPair vk = *k;
-		RootList *rl = vk.second;
-		pursue = vk.first;
-
-		unsolved = false;
-		solved = false;
-
-		std::vector<Handle>::iterator i = rl->begin();
-		std::vector<Handle>::iterator iend = rl->end();
-		for (; i != iend; i++)
-		{
-			Handle root(*i);
-			Handle root_gnd(clause_grounding[root]);
-			if (Handle::UNDEFINED != root_gnd)
-			{
-				solved = true;
-			}
-			else if (issued.end() == issued.find(root))
-			{
-				unsolved_clause = root;
-				unsolved = true;
-			}
-		}
-		if (solved && unsolved) break;
-	}
-
-	if (solved && unsolved)
-	{
-		// Pursue is a pointer to a node that's shared between
-		// several clauses. One of the predicates has been
-		// solved, another has not.  We want to now traverse
-		// upwards from this node, to find the top of the
-		// unsolved clause.
-		curr_root = unsolved_clause;
-		curr_pred_handle = pursue;
-
-		if (Handle::UNDEFINED != unsolved_clause)
-		{
-			issued.insert(unsolved_clause);
-			return;
-		}
-	}
-
-	// If we are here, there are no more unsolved clauses to consider.
-	curr_root = Handle::UNDEFINED;
-	curr_pred_handle = Handle::UNDEFINED;
+	return false;
 }
 
 /* ======================================================== */
@@ -739,6 +851,7 @@ void PatternMatchEngine::clear_state(void)
 	curr_pred_handle = Handle::UNDEFINED;
 	depth = 0;
 
+	stack_depth = 0;
 	while (!pred_handle_stack.empty()) pred_handle_stack.pop();
 	while (!soln_handle_stack.empty()) soln_handle_stack.pop();
 	while (!root_handle_stack.empty()) root_handle_stack.pop();
@@ -746,6 +859,11 @@ void PatternMatchEngine::clear_state(void)
 	while (!var_solutn_stack.empty()) var_solutn_stack.pop();
 	while (!issued_stack.empty()) issued_stack.pop();
 	while (!in_quote_stack.empty()) in_quote_stack.pop();
+
+	have_more = false;
+	more_depth = 0;
+	more_stack.clear();
+	while (!mute_stack.empty()) mute_stack.pop();
 }
 
 

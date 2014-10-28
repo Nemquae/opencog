@@ -36,6 +36,7 @@
 
 #include <opencog/util/dorepeat.h>
 #include <opencog/util/Logger.h>
+#include <opencog/util/lazy_random_selector.h>
 
 #include "../combo/ann.h"
 #include "../combo/simple_nn.h"
@@ -864,7 +865,56 @@ bool complete_truth_table::same_complete_truth_table(const combo_tree& tr) const
     }
     return true;
 }
-// -------------------------------------------------------
+
+/////////////////////
+// Subsample table //
+/////////////////////
+
+// Remove enough rows randomly so that the table has only nrows
+void subsampleTable(unsigned nrows, ITable& it, OTable& ot, TTable& tt)
+{
+    OC_ASSERT(it.empty() || ot.empty() || it.size() == ot.size());
+    OC_ASSERT(ot.empty() || tt.empty() || ot.size() == tt.size());
+    OC_ASSERT(tt.empty() || it.empty() || tt.size() == it.size());
+    unsigned size = std::max(it.size(), std::max(ot.size(), tt.size()));
+    if(nrows < size) {
+        unsigned nremove = size - nrows;
+        dorepeat(nremove) {
+            unsigned int ridx = randGen().randint(size);
+            if (!it.empty())
+                it.erase(it.begin()+ridx);
+            if (!ot.empty())
+                ot.erase(ot.begin()+ridx);
+            if (!tt.empty())
+                tt.erase(tt.begin()+ridx);
+        }
+    }
+}
+
+void subsampleTable(float ratio, Table& table)
+{
+    OC_ASSERT(0.0 <= ratio and ratio <= 1.0,
+              "Ratio must be in [0.0, 1.0], but is %f", ratio);
+    subsampleTable(ratio * table.size(), table.itable, table.otable, table.ttable);
+}
+
+void subsampleCTable(float ratio, CTable& ctable)
+{
+    OC_ASSERT(0.0 <= ratio and ratio <= 1.0,
+              "Ratio must be in [0.0, 1.0], but is %f", ratio);
+    std::set<unsigned> rm_row_idxs;
+    unsigned ctable_usize = ctable.uncompressed_size(),
+        nremove = (1.0 - ratio) * ctable_usize;
+    lazy_random_selector rm_selector(ctable_usize);
+    dorepeat(nremove)
+        rm_row_idxs.insert(rm_selector.select());
+    ctable.remove_rows(rm_row_idxs);
+    subsampleCTable(ratio * ctable.uncompressed_size(), ctable);
+}
+
+////////////////////////
+// Mutual Information //
+////////////////////////
 
 double OTEntropy(const OTable& ot)
 {
