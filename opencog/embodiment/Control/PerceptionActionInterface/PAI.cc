@@ -204,14 +204,15 @@ void PAI::sendActionPlan(ActionPlanID planId) throw (opencog::RuntimeException, 
     if (it != inProgressActionPlans.end()) {
         const ActionPlan& plan = it->second;
         if (actionSender.sendActionPlan(plan)) {
-            // mark action plan as sent by moving it from inProgress to pending map
-            
-            // must be added first. Otherwise the reference to the plan becomes invalid
+            // Mark action plan as sent by moving it from inProgress
+            // to pending map. Must be added first. Otherwise the
+            // reference to the plan becomes invalid.
             pendingActionPlans[planId] = plan;
             inProgressActionPlans.erase(it->first);
 
-            // TODO: Add a "ActionTried" predicate for each action in the sent action plan
-            // (i.e., each ExecLink Handle in planToActionIdsMaps[planId])
+            // TODO: Add a "ActionTried" predicate for each action in
+            // the sent action plan (i.e., each ExecLink Handle in
+            // planToActionIdsMaps[planId])
         } else {
             throw opencog::RuntimeException(TRACE_INFO,
                 "PAI - ActionPlanSender could not send the ActionPlan '%s'.", planId.c_str());
@@ -505,35 +506,28 @@ ActionID PAI::addAction(ActionPlanID planId, const AvatarAction& action) throw (
     return result;
 }
 
-HandleSeq PAI::getActionSeqFromPlan(ActionPlanID planId)
+HandleSeq PAI::getActionSeqFromPlan(ActionPlanID planId) const
 {
     HandleSeq actionHandles;
-    PlanToActionIdsMap::iterator planIt = planToActionIdsMaps.find(planId);
-    if (planIt == planToActionIdsMaps.end())
-        return actionHandles;
+    PlanToActionIdsMap::const_iterator planIt = planToActionIdsMaps.find(planId);
 
-    ActionIdMap::iterator actionIt ;
-
-
-    for (actionIt = planToActionIdsMaps[planId].begin(); actionIt != planToActionIdsMaps[planId].end(); ++ actionIt)
-    {
-        actionHandles.push_back(actionIt->second);
-    }
+    if (planIt != planToActionIdsMaps.end())
+        for (const ActionIdMap::value_type& actionId : planIt->second)
+            actionHandles.push_back(actionId.second);
 
     return actionHandles;
 }
 
-bool PAI::isActionPlanEmpty(const ActionPlanID& planId)
+bool PAI::isActionPlanEmpty(const ActionPlanID& planId) const
 {
-    ActionPlanMap::iterator it = inProgressActionPlans.find(planId);
+    ActionPlanMap::const_iterator it = inProgressActionPlans.find(planId);
 
     if (it != inProgressActionPlans.end()) {
         return it->second.empty();
     } else {
-        logger().warn(
-                     "PAI - No action plan with id = %s in progress\n",
-                     planId.c_str());
-        return false;
+        logger().warn("PAI - No action plan with id = %s in progress\n",
+                      planId.c_str());
+        return true;
     }
 }
 
