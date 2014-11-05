@@ -561,7 +561,7 @@ bool PAI::processPVPMessage(const string& pvpMsg, HandleSeq &toUpdateHandles)
         delete memBufIS;
         return false;
     } catch (...) {
-        logger().error("PAI - Unexpected XML Parse Exception\n");
+        logger().error("PAI - Unexpected XML Parse Exception: %s\n", pvpMsg.c_str());
         delete memBufIS;
         return false;
     }

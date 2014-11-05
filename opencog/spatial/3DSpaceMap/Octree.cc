@@ -139,8 +139,8 @@ void Octree::addSolidBlock(Block3D * _block, bool byKnownIndexes, int _x, int _y
                 if (count++ > mOctree3DMapManager->getTotalDepthOfOctree())
                 {
                     // usually it should not go here. This to prevent this while loop from not stopping
-                    logger().error("Cannot find a proper position for this block at x = %d, y = %d, z= %d ! /n",
-                                   _block->getPosition().x,_block->getPosition().y,_block->getPosition().z);
+                    logger().error("Cannot find a proper position for this block at x = %d, y = %d, z= %d, with color:%s ! /n",
+                                   _block->getPosition().x,_block->getPosition().y,_block->getPosition().z,_block->getBlockMaterial().color.c_str());
                     return;
                 }
 
